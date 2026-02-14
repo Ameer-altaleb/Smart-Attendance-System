@@ -155,7 +155,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
           fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS),
           fetchTable('templates', setTemplates, INITIAL_TEMPLATES),
-          fetchTable('settings', setSettings, INITIAL_SETTINGS)
+          fetchTable('settings', setSettings, INITIAL_SETTINGS),
+          fetchTable('projects', setProjects, INITIAL_PROJECTS)
         ]);
       } else {
         const fetchTableMap: Record<string, () => Promise<void>> = {
@@ -167,6 +168,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           'holidays': () => fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
           'notifications': () => fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS),
           'templates': () => fetchTable('templates', setTemplates, INITIAL_TEMPLATES),
+          'projects': () => fetchTable('projects', setProjects, INITIAL_PROJECTS),
         };
         if (fetchTableMap[tableName]) await fetchTableMap[tableName]();
       }
@@ -349,6 +351,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       // Execute the actual operation if supabase is configured
       if (checkSupabaseConnection() && supabase) {
+        // Clean the data: Convert empty strings to null for UUID fields to prevent PG errors
+        const sanitize = (obj: any) => {
+          if (typeof obj !== 'object' || obj === null) return obj;
+          const cleaned = { ...obj };
+          for (const key in cleaned) {
+            if (cleaned[key] === '') cleaned[key] = null;
+          }
+          return cleaned;
+        };
+
         const { error } = await withRetry(async () => await operation());
         if (error) {
           console.error(`Database error in ${tableName}:`, error);
