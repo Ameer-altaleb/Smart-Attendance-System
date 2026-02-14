@@ -200,20 +200,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     init();
   }, [refreshData]);
 
-  // Real-time Database Subscriptions
+  // Real-time Database Subscriptions for the Entire System
   useEffect(() => {
     if (!checkSupabaseConnection() || !supabase) return;
 
-    const channel = supabase.channel('db-changes')
+    const channel = supabase.channel('system-wide-changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'attendance' },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setAttendance(prev => {
-              if (prev.some(a => a.id === payload.new.id)) return prev;
-              return [...prev, payload.new as AttendanceRecord];
-            });
+            setAttendance(prev => prev.some(a => a.id === payload.new.id) ? prev : [...prev, payload.new as AttendanceRecord]);
           } else if (payload.eventType === 'UPDATE') {
             setAttendance(prev => prev.map(a => a.id === payload.new.id ? payload.new as AttendanceRecord : a));
           } else if (payload.eventType === 'DELETE') {
@@ -226,10 +223,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         { event: '*', schema: 'public', table: 'employees' },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setEmployees(prev => {
-              if (prev.some(e => e.id === payload.new.id)) return prev;
-              return [...prev, payload.new as Employee];
-            });
+            setEmployees(prev => prev.some(e => e.id === payload.new.id) ? prev : [...prev, payload.new as Employee]);
           } else if (payload.eventType === 'UPDATE') {
             setEmployees(prev => prev.map(e => e.id === payload.new.id ? payload.new as Employee : e));
           } else if (payload.eventType === 'DELETE') {
@@ -242,10 +236,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         { event: '*', schema: 'public', table: 'centers' },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setCenters(prev => {
-              if (prev.some(c => c.id === payload.new.id)) return prev;
-              return [...prev, payload.new as Center];
-            });
+            setCenters(prev => prev.some(c => c.id === payload.new.id) ? prev : [...prev, payload.new as Center]);
           } else if (payload.eventType === 'UPDATE') {
             setCenters(prev => prev.map(c => c.id === payload.new.id ? payload.new as Center : c));
           } else if (payload.eventType === 'DELETE') {
@@ -258,14 +249,72 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         { event: '*', schema: 'public', table: 'projects' },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setProjects(prev => {
-              if (prev.some(p => p.id === payload.new.id)) return prev;
-              return [...prev, payload.new as Project];
-            });
+            setProjects(prev => prev.some(p => p.id === payload.new.id) ? prev : [...prev, payload.new as Project]);
           } else if (payload.eventType === 'UPDATE') {
             setProjects(prev => prev.map(p => p.id === payload.new.id ? payload.new as Project : p));
           } else if (payload.eventType === 'DELETE') {
             setProjects(prev => prev.filter(p => p.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'admins' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setAdmins(prev => prev.some(a => a.id === payload.new.id) ? prev : [...prev, payload.new as Admin]);
+          } else if (payload.eventType === 'UPDATE') {
+            setAdmins(prev => prev.map(a => a.id === payload.new.id ? payload.new as Admin : a));
+          } else if (payload.eventType === 'DELETE') {
+            setAdmins(prev => prev.filter(a => a.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'holidays' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setHolidays(prev => prev.some(h => h.id === payload.new.id) ? prev : [...prev, payload.new as Holiday]);
+          } else if (payload.eventType === 'UPDATE') {
+            setHolidays(prev => prev.map(h => h.id === payload.new.id ? payload.new as Holiday : h));
+          } else if (payload.eventType === 'DELETE') {
+            setHolidays(prev => prev.filter(h => h.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setNotifications(prev => prev.some(n => n.id === payload.new.id) ? prev : [...prev, payload.new as Notification]);
+          } else if (payload.eventType === 'UPDATE') {
+            setNotifications(prev => prev.map(n => n.id === payload.new.id ? payload.new as Notification : n));
+          } else if (payload.eventType === 'DELETE') {
+            setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'templates' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setTemplates(prev => prev.some(t => t.id === payload.new.id) ? prev : [...prev, payload.new as MessageTemplate]);
+          } else if (payload.eventType === 'UPDATE') {
+            setTemplates(prev => prev.map(t => t.id === payload.new.id ? payload.new as MessageTemplate : t));
+          } else if (payload.eventType === 'DELETE') {
+            setTemplates(prev => prev.filter(t => t.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'settings' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            setSettings(payload.new as SystemSettings);
           }
         }
       )
