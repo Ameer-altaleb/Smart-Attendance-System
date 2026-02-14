@@ -338,7 +338,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, []);
 
-  // Optimized database operations (Mocked for Local-Only mode)
+  // Optimized database operations (Enhanced with error notifications)
   const executeDbOperation = useCallback(async <T,>(
     tableName: string,
     operation: () => Promise<any>,
@@ -352,20 +352,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const { error } = await withRetry(async () => await operation());
         if (error) {
           console.error(`Database error in ${tableName}:`, error);
-          // Still call onSuccess for optimistic UI consistency in local mode
+          // Show visible error notification
+          setNotifications(prev => [...prev, {
+            id: crypto.randomUUID(),
+            title: 'خطأ في مزامنة البيانات',
+            message: `فشل الحفظ في جدول ${tableName}: ${error.message}`,
+            targetType: 'all',
+            senderName: 'النظام التقني',
+            sentAt: new Date().toISOString()
+          }]);
+        } else {
+          onSuccess?.();
         }
+      } else {
+        // Fallback for local mode
+        onSuccess?.();
       }
 
-      // In all cases (even local mode), we simulate the async success
+      // Always clear pending status
       setTimeout(() => {
-        onSuccess?.();
         updatePendingOps(tableName, -1);
-      }, 100);
-    } catch (error) {
+      }, 500);
+    } catch (error: any) {
       console.error(`Execution error in ${tableName}:`, error);
       updatePendingOps(tableName, -1);
     }
-  }, [updatePendingOps]);
+  }, [updatePendingOps]); // Removed addNotification from dependencies
 
   // Centers CRUD with optimistic updates
   const addCenter = useCallback(async (c: Center) => {
