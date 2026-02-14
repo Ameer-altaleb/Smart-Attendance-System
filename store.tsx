@@ -340,6 +340,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, []);
 
+  // Data Sanitizer to prevent DB errors
+  const sanitize = (obj: any) => {
+    if (typeof obj !== 'object' || obj === null) return obj;
+    const cleaned = { ...obj };
+    for (const key in cleaned) {
+      if (cleaned[key] === '') cleaned[key] = null;
+    }
+    return cleaned;
+  };
+
   // Optimized database operations (Enhanced with error notifications)
   const executeDbOperation = useCallback(async <T,>(
     tableName: string,
@@ -351,16 +361,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       // Execute the actual operation if supabase is configured
       if (checkSupabaseConnection() && supabase) {
-        // Clean the data: Convert empty strings to null for UUID fields to prevent PG errors
-        const sanitize = (obj: any) => {
-          if (typeof obj !== 'object' || obj === null) return obj;
-          const cleaned = { ...obj };
-          for (const key in cleaned) {
-            if (cleaned[key] === '') cleaned[key] = null;
-          }
-          return cleaned;
-        };
-
         const { error } = await withRetry(async () => await operation());
         if (error) {
           console.error(`Database error in ${tableName}:`, error);
@@ -389,7 +389,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       console.error(`Execution error in ${tableName}:`, error);
       updatePendingOps(tableName, -1);
     }
-  }, [updatePendingOps]); // Removed addNotification from dependencies
+  }, [updatePendingOps]);
 
   // Centers CRUD with optimistic updates
   const addCenter = useCallback(async (c: Center) => {
@@ -440,7 +440,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Notifications CRUD
   const addNotification = useCallback(async (n: Notification) => {
     setNotifications(prev => [...prev, n]);
-    executeDbOperation('notifications', () => supabase!.from('notifications').insert(n));
+    return executeDbOperation('notifications', () => supabase!.from('notifications').insert(sanitize(n)));
   }, [executeDbOperation]);
 
   const deleteNotification = useCallback(async (id: string) => {
