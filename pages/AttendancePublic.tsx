@@ -331,7 +331,6 @@ const AttendancePublic: React.FC = () => {
           setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
         }
       }
-      refreshData('attendance');
     } catch (err) {
       console.error(err);
       setMessage({ text: 'حدث خطأ في النظام، يرجى إعادة المحاولة.', type: 'error' });
