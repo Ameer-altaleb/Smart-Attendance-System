@@ -479,6 +479,77 @@ const AttendancePublic: React.FC = () => {
                 )}
               </div>
 
+              {/* حالة الموظف اليومية - جديد */}
+              {matchedCenter && selectedEmployeeId && (() => {
+                const todayStr = format(currentTime, 'yyyy-MM-dd');
+                const todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
+
+                return (
+                  <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400">
+                    {!todayRecord ? (
+                      <div className="flex items-center gap-3 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                        <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-slate-500">
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-500">الحالة اليومية</p>
+                          <p className="text-sm font-black text-slate-800">لم يبدأ العمل بعد</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className={`p-4 rounded-2xl border flex items-center gap-3 ${todayRecord.checkIn ? 'bg-emerald-50 border-emerald-100/50' : 'bg-slate-50 border-slate-100'
+                          }`}>
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${todayRecord.checkIn ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'
+                            }`}>
+                            <LogIn className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold opacity-70">وقت الدخول</p>
+                            <p className="text-sm font-black">
+                              {todayRecord.checkIn ? format(new Date(todayRecord.checkIn), 'hh:mm a', { locale: ar }) : '--:--'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className={`p-4 rounded-2xl border flex items-center gap-3 ${todayRecord.checkOut ? 'bg-indigo-50 border-indigo-100/50' : 'bg-slate-50 border-slate-100'
+                          }`}>
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${todayRecord.checkOut ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'
+                            }`}>
+                            <LogOut className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold opacity-70">وقت الخروج</p>
+                            <p className="text-sm font-black">
+                              {todayRecord.checkOut ? format(new Date(todayRecord.checkOut), 'hh:mm a', { locale: ar }) : '--:--'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* رسائل النظام - تم نقلها هنا */}
+              {message && (
+                <div className={`p-6 md:p-8 rounded-[2.5rem] border-2 shadow-sm animate-in zoom-in-95 duration-300 ${message.type === 'success' ? 'bg-emerald-50 border-emerald-100/50 text-emerald-800' :
+                  message.type === 'security' ? 'bg-rose-50 border-rose-100/50 text-rose-800' :
+                    'bg-amber-50 border-amber-100/50 text-amber-800'
+                  }`}>
+                  <div className="flex items-center gap-5">
+                    <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0 ${message.type === 'success' ? 'text-emerald-500' : 'text-rose-500'
+                      }`}>
+                      {message.type === 'success' ? <CheckCircle2 className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-60">تنبيه النظام</p>
+                      <p className="text-base md:text-lg font-black leading-relaxed">{message.text}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {matchedCenter && (
                 <div className="flex flex-col md:flex-row gap-5 md:gap-6 pt-4 animate-in fade-in slide-in-from-top-4 duration-700 delay-500">
                   <button
@@ -511,23 +582,7 @@ const AttendancePublic: React.FC = () => {
             </div>
           )}
 
-          {message && (
-            <div className={`p-6 md:p-8 rounded-[2.5rem] border-2 shadow-sm animate-in zoom-in-95 duration-700 ${message.type === 'success' ? 'bg-emerald-50 border-emerald-100/50 text-emerald-800' :
-              message.type === 'security' ? 'bg-rose-50 border-rose-100/50 text-rose-800' :
-                'bg-amber-50 border-amber-100/50 text-amber-800'
-              }`}>
-              <div className="flex items-center gap-5">
-                <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0 ${message.type === 'success' ? 'text-emerald-500' : 'text-rose-500'
-                  }`}>
-                  {message.type === 'success' ? <CheckCircle2 className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-60">تنبيه النظام</p>
-                  <p className="text-base md:text-lg font-black leading-relaxed">{message.text}</p>
-                </div>
-              </div>
-            </div>
-          )}
+
         </div>
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 px-10 py-6 bg-white/40 backdrop-blur-sm rounded-[2rem] border border-white/60 shadow-sm">
@@ -550,31 +605,33 @@ const AttendancePublic: React.FC = () => {
         </div>
       </div>
 
-      {activeNotification && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-700">
-          <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] w-full max-w-lg shadow-[0_50px_100px_-20px_rgba(0,0,0,0.2)] overflow-hidden animate-in zoom-in-95 duration-500">
-            <div className="p-8 md:p-12 text-center space-y-6 md:space-y-8">
-              <div className="w-20 h-20 md:w-24 md:h-24 bg-indigo-50 text-indigo-600 rounded-[2rem] md:rounded-[2.5rem] flex items-center justify-center mx-auto shadow-inner">
-                <BellRing className="w-10 h-10 md:w-12 md:h-12" />
+      {
+        activeNotification && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-700">
+            <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] w-full max-w-lg shadow-[0_50px_100px_-20px_rgba(0,0,0,0.2)] overflow-hidden animate-in zoom-in-95 duration-500">
+              <div className="p-8 md:p-12 text-center space-y-6 md:space-y-8">
+                <div className="w-20 h-20 md:w-24 md:h-24 bg-indigo-50 text-indigo-600 rounded-[2rem] md:rounded-[2.5rem] flex items-center justify-center mx-auto shadow-inner">
+                  <BellRing className="w-10 h-10 md:w-12 md:h-12" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">{activeNotification.title}</h3>
+                  <p className="text-[9px] md:text-[10px] text-indigo-600 font-black uppercase tracking-[0.3em]">إدارة شؤون الموظفين</p>
+                </div>
+                <div className="bg-slate-50 p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-inner">
+                  <p className="text-slate-600 font-bold leading-loose text-base md:text-lg">{activeNotification.message}</p>
+                </div>
+                <button
+                  onClick={handleDismissNotif}
+                  className="w-full bg-slate-900 text-white font-black py-5 md:py-6 rounded-2xl md:rounded-[2.5rem] hover:bg-black transition-all flex items-center justify-center gap-3 uppercase text-[10px] md:text-xs tracking-widest active:scale-95 shadow-xl shadow-slate-900/20"
+                >
+                  <Check className="w-5 h-5 md:w-6 md:h-6 text-emerald-400" /> قرأت وأوافق
+                </button>
               </div>
-              <div className="space-y-2">
-                <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">{activeNotification.title}</h3>
-                <p className="text-[9px] md:text-[10px] text-indigo-600 font-black uppercase tracking-[0.3em]">إدارة شؤون الموظفين</p>
-              </div>
-              <div className="bg-slate-50 p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-inner">
-                <p className="text-slate-600 font-bold leading-loose text-base md:text-lg">{activeNotification.message}</p>
-              </div>
-              <button
-                onClick={handleDismissNotif}
-                className="w-full bg-slate-900 text-white font-black py-5 md:py-6 rounded-2xl md:rounded-[2.5rem] hover:bg-black transition-all flex items-center justify-center gap-3 uppercase text-[10px] md:text-xs tracking-widest active:scale-95 shadow-xl shadow-slate-900/20"
-              >
-                <Check className="w-5 h-5 md:w-6 md:h-6 text-emerald-400" /> قرأت وأوافق
-              </button>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 };
 
