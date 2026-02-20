@@ -107,6 +107,9 @@ const ReportRow = memo(({
           )}
         </div>
       </td>
+      <td className="px-6 py-4 text-center">
+        <span className="text-[10px] font-bold text-rose-600">{record.notes || '-'}</span>
+      </td>
     </tr>
   );
 });
@@ -463,7 +466,7 @@ const Reports: React.FC = () => {
             record.delayMinutes || 0,
             record.earlyDepartureMinutes || 0,
             record.workingHours || 0,
-            note
+            record.notes || note
           ];
         });
 
@@ -684,8 +687,9 @@ const Reports: React.FC = () => {
                 <th className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الحضور (مطلوب/فعلي)</th>
                 <th className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الانصراف (مطلوب/فعلي)</th>
                 <th className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">تأخير / مبكر</th>
-                <th className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الساعات</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">ملاحظات الحالة</th>
+                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الساعات</th>
+                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الحالة</th>
+                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">ملاحظات النظام</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -743,6 +747,7 @@ const Reports: React.FC = () => {
                 <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">تأخير/مبكر</th>
                 <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">ساعات</th>
                 <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الحالة</th>
+                <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">ملاحظات</th>
               </tr>
             </thead>
             <tbody>
@@ -766,6 +771,9 @@ const Reports: React.FC = () => {
                     <td className="px-3 py-1.5 border border-slate-300 text-center font-bold">{record.workingHours}h</td>
                     <td className="px-3 py-1.5 border border-slate-300 text-center">
                       {record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : 'معلق'}
+                    </td>
+                    <td className="px-3 py-1.5 border border-slate-300 text-center text-[10px] text-rose-600 font-bold">
+                      {record.notes || '-'}
                     </td>
                   </tr>
                 );
