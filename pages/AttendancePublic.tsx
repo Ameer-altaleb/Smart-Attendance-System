@@ -193,6 +193,7 @@ const AttendancePublic: React.FC = () => {
     try {
       const currentSyncedTime = new Date(Date.now() + timeOffset);
       const currentDeviceId = getDeviceId();
+      const today = format(currentSyncedTime, 'yyyy-MM-dd');
 
       // 1. Mandatory Network (IP) Verification
       if (selectedCenter.authorizedIP && userIP !== selectedCenter.authorizedIP) {
@@ -259,78 +260,138 @@ const AttendancePublic: React.FC = () => {
         await updateEmployee({ ...localEmployee, deviceId: currentDeviceId });
       }
 
-      const today = format(currentSyncedTime, 'yyyy-MM-dd');
-
-      // العثور على أحدث سجل للموظف
-      const recentRecord = [...attendance]
-        .filter(a => a.employeeId === selectedEmployeeId)
-        .sort((a, b) => new Date(b.checkIn!).getTime() - new Date(a.checkIn!).getTime())[0];
-
       const isShiftWorker = localEmployee.workType === 'shifts';
-      const hasOpenRecord = recentRecord && !recentRecord.checkOut;
+
+      // --- Logic Update for Forgotten Actions ---
+
+      const employeeRecords = attendance.filter(a => a.employeeId === selectedEmployeeId);
+      const todayRecord = employeeRecords.find(a => a.date === today);
+      const lastRecord = [...employeeRecords].sort((a, b) => new Date(b.checkIn!).getTime() - new Date(a.checkIn!).getTime())[0];
+
+      let noteMessage = '';
 
       if (type === 'in') {
-        if (hasOpenRecord) {
-          setMessage({ text: 'لديك سجل دخول نشط بالفعل. يرجى تسجيل الخروج أولاً عند انتهاء المناوبة.', type: 'error' });
-        } else {
-          // للموظف الإداري، نمنع تكرار الدخول في نفس اليوم
-          if (!isShiftWorker) {
-            const alreadyCheckedInToday = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === today);
-            if (alreadyCheckedInToday) {
-              setMessage({ text: 'لقد سجلت دخولك مسبقاً لهذا اليوم.', type: 'error' });
+        // A. Check for Open Record from LAST DAY (Forgot Check-out)
+        if (lastRecord && !lastRecord.checkOut && lastRecord.date !== today) {
+          const prevCheckIn = new Date(lastRecord.checkIn!);
+          // Auto-close at checkIn + 4 hours (Half day penalty)
+          const autoCheckOut = new Date(prevCheckIn.getTime() + (4 * 60 * 60 * 1000));
+
+          await updateAttendance({
+            ...lastRecord,
+            checkOut: autoCheckOut.toISOString(),
+            checkOutDate: lastRecord.date,
+            workingHours: 4, // 50% penalty fixed
+            notes: 'إغلاق آلي - خصم 50% - نسيان تسجيل الخروج'
+          });
+          noteMessage = ' (تنبيه: تم إغلاق سجل سابق معلق مع خصم لنقص الساعات).';
+        }
+
+        // B. Check for Today's Status
+        if (todayRecord) {
+          if (!todayRecord.checkOut) {
+            setMessage({ text: 'لديك سجل دخول نشط بالفعل لهذا اليوم.', type: 'error' });
+            setIsSubmitting(false);
+            return;
+          } else {
+            if (!isShiftWorker) {
+              setMessage({ text: 'لقد سجلت دخولك وخروجك مسبقاً لهذا اليوم.', type: 'error' });
               setIsSubmitting(false);
               return;
             }
           }
+        }
 
-          const delay = !isShiftWorker
-            ? calculateDelay(currentSyncedTime, selectedCenter.defaultStartTime, selectedCenter.checkInGracePeriod)
-            : 0; // نظام المناوبات لا يحسب التأخير الصباحي بنفس الطريقة الإدارية
+        // C. Normal Check-In
+        const delay = !isShiftWorker
+          ? calculateDelay(currentSyncedTime, selectedCenter.defaultStartTime, selectedCenter.checkInGracePeriod)
+          : 0;
 
+        const record: AttendanceRecord = {
+          id: crypto.randomUUID(),
+          employeeId: selectedEmployeeId,
+          centerId: selectedCenter.id,
+          date: today,
+          checkIn: currentSyncedTime.toISOString(),
+          status: delay > 0 ? 'late' : 'present',
+          delayMinutes: delay,
+          earlyDepartureMinutes: 0,
+          workingHours: 0,
+          ipAddress: userIP,
+          latitude: userLocation?.lat,
+          longitude: userLocation?.lon,
+          notes: delay > 0 ? `تأخير ${delay} دقيقة` : undefined
+        };
+        await addAttendance(record);
+
+        const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
+        setMessage({
+          text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح') + noteMessage,
+          type: 'success'
+        });
+
+      } else {
+        // type === 'out'
+
+        // A. Forgot Check-In (No record for today)
+        if (!todayRecord) {
+          // Create Dummy Record
+          const nowIso = currentSyncedTime.toISOString();
           const record: AttendanceRecord = {
             id: crypto.randomUUID(),
             employeeId: selectedEmployeeId,
             centerId: selectedCenter.id,
             date: today,
-            checkIn: currentSyncedTime.toISOString(),
-            status: delay > 0 ? 'late' : 'present',
-            delayMinutes: delay,
+            checkIn: nowIso,
+            checkOut: nowIso,
+            checkOutDate: today,
+            status: 'absent', // Marked as problem
+            delayMinutes: 0,
             earlyDepartureMinutes: 0,
             workingHours: 0,
             ipAddress: userIP,
             latitude: userLocation?.lat,
-            longitude: userLocation?.lon
+            longitude: userLocation?.lon,
+            notes: 'سجل ناقص - نسيان تسجيل الدخول (0 ساعات)'
           };
           await addAttendance(record);
-          const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
-          setMessage({ text: template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح', type: 'success' });
-        }
-      } else {
-        if (!hasOpenRecord) {
-          setMessage({ text: 'يرجى تسجيل الدخول أولاً.', type: 'error' });
-        } else {
-          const now = currentSyncedTime;
-
-          // الخروج المبكر يطبق فقط على الإداريين
-          const early = !isShiftWorker
-            ? calculateEarlyDeparture(now, selectedCenter.defaultEndTime, selectedCenter.checkOutGracePeriod)
-            : 0;
-
-          const hours = calculateWorkingHours(new Date(recentRecord.checkIn!), now);
-
-          await updateAttendance({
-            ...recentRecord,
-            checkOut: now.toISOString(),
-            checkOutDate: format(now, 'yyyy-MM-dd'),
-            earlyDepartureMinutes: early,
-            workingHours: hours,
-            latitude: userLocation?.lat,
-            longitude: userLocation?.lon
+          setMessage({
+            text: 'تم تسجيل الانصراف. تنبيه: لم يتم تسجيل دخولك صباحاً، راجع الإدارة لتعديل الوقت وإلا ستعتبر ساعات عملك (صفر).',
+            type: 'security'
           });
-          const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
-          setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
+          setIsSubmitting(false);
+          return;
         }
+
+        // B. Already Checked Out
+        if (todayRecord.checkOut) {
+          setMessage({ text: 'لقد أتممت تسجيل انصرافك لهذا اليوم مسبقاً.', type: 'error' });
+          setIsSubmitting(false);
+          return;
+        }
+
+        // C. Normal Check-Out
+        const now = currentSyncedTime;
+        const early = !isShiftWorker
+          ? calculateEarlyDeparture(now, selectedCenter.defaultEndTime, selectedCenter.checkOutGracePeriod)
+          : 0;
+
+        const hours = calculateWorkingHours(new Date(todayRecord.checkIn!), now);
+
+        await updateAttendance({
+          ...todayRecord,
+          checkOut: now.toISOString(),
+          checkOutDate: format(now, 'yyyy-MM-dd'),
+          earlyDepartureMinutes: early,
+          workingHours: hours,
+          latitude: userLocation?.lat,
+          longitude: userLocation?.lon
+        });
+
+        const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
+        setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
       }
+
     } catch (err) {
       console.error(err);
       setMessage({ text: 'حدث خطأ في النظام، يرجى إعادة المحاولة.', type: 'error' });
