@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import {
   LogIn, LogOut, CheckCircle2, ShieldAlert, Smartphone,
-  BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown, Activity
+  BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown
 } from 'lucide-react';
 import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance } from '../utils/attendanceLogic.ts';
 import { AttendanceRecord, Employee, Notification, Center } from '../types.ts';
@@ -193,7 +193,6 @@ const AttendancePublic: React.FC = () => {
     try {
       const currentSyncedTime = new Date(Date.now() + timeOffset);
       const currentDeviceId = getDeviceId();
-      const today = format(currentSyncedTime, 'yyyy-MM-dd');
 
       // 1. Mandatory Network (IP) Verification
       if (selectedCenter.authorizedIP && userIP !== selectedCenter.authorizedIP) {
@@ -238,24 +237,12 @@ const AttendancePublic: React.FC = () => {
       if (!localEmployee) throw new Error('Employee record missing');
 
       if (localEmployee.deviceId && localEmployee.deviceId !== currentDeviceId) {
-        // Silent 24-hour Re-linking Logic
-        if (localEmployee.lastDeviceIdUpdate !== today) {
-          // Perform silent update and proceed
-          await updateEmployee({
-            ...localEmployee,
-            deviceId: currentDeviceId,
-            lastDeviceIdUpdate: today
-          });
-          // Proceed normally - No error message shown to user
-        } else {
-          // Already updated today, show existing error
-          setMessage({
-            text: 'خطأ أمني: هذا الحساب مرتبط بجهاز آخر. لا يسمح بتسجيل الدخول إلا من جهازك الشخصي المسجل مسبقاً.',
-            type: 'security'
-          });
-          setIsSubmitting(false);
-          return;
-        }
+        setMessage({
+          text: 'خطأ أمني: هذا الحساب مرتبط بجهاز آخر. لا يسمح بتسجيل الدخول إلا من جهازك الشخصي المسجل مسبقاً.',
+          type: 'security'
+        });
+        setIsSubmitting(false);
+        return;
       }
 
       const conflict = employees.find(e => e.deviceId === currentDeviceId && e.id !== selectedEmployeeId);
@@ -272,145 +259,79 @@ const AttendancePublic: React.FC = () => {
         await updateEmployee({ ...localEmployee, deviceId: currentDeviceId });
       }
 
+      const today = format(currentSyncedTime, 'yyyy-MM-dd');
+
+      // العثور على أحدث سجل للموظف
+      const recentRecord = [...attendance]
+        .filter(a => a.employeeId === selectedEmployeeId)
+        .sort((a, b) => new Date(b.checkIn!).getTime() - new Date(a.checkIn!).getTime())[0];
+
       const isShiftWorker = localEmployee.workType === 'shifts';
-
-      // --- Logic Update for Cross-day Shifts ---
-
-      const employeeRecords = attendance.filter(a => a.employeeId === selectedEmployeeId);
-      const todayRecord = employeeRecords.find(a => a.date === today);
-
-      // For shift workers, we look for the last OPEN record regardless of the date
-      // For admin workers, we only care about today's record
-      const activeRecord = isShiftWorker
-        ? [...employeeRecords].find(a => !a.checkOut)
-        : todayRecord;
-
-      // lastRecord is used for the forgotten-checkout logic (mostly for admin workers)
-      const lastRecord = [...employeeRecords].sort((a, b) => new Date(b.checkIn!).getTime() - new Date(a.checkIn!).getTime())[0];
-
-      let noteMessage = '';
+      const hasOpenRecord = recentRecord && !recentRecord.checkOut;
 
       if (type === 'in') {
-        // A. Check for Open Record from LAST DAY (Forgot Check-out)
-        if (lastRecord && !lastRecord.checkOut && lastRecord.date !== today) {
-          const prevCheckIn = new Date(lastRecord.checkIn!);
-          // Auto-close at checkIn + 4 hours (Half day penalty)
-          const autoCheckOut = new Date(prevCheckIn.getTime() + (4 * 60 * 60 * 1000));
-
-          await updateAttendance({
-            ...lastRecord,
-            checkOut: autoCheckOut.toISOString(),
-            checkOutDate: lastRecord.date,
-            workingHours: 4, // 50% penalty fixed
-            notes: 'إغلاق آلي - خصم 50% - نسيان تسجيل الخروج'
-          });
-          noteMessage = ' (تنبيه: تم إغلاق سجل سابق معلق مع خصم لنقص الساعات).';
-        }
-
-        // B. Check for Today's Status
-        if (activeRecord) {
-          if (!activeRecord.checkOut) {
-            const startDate = activeRecord.date !== today ? format(new Date(activeRecord.checkIn!), 'eeee (dd-MM)', { locale: ar }) : 'اليوم';
-            setMessage({ text: `لديك سجل دخول نشط بالفعل بدأ ${startDate}. يجب تسجيل الانصراف أولاً.`, type: 'error' });
-            setIsSubmitting(false);
-            return;
-          } else if (!isShiftWorker) {
-            setMessage({ text: 'لقد سجلت دخولك وخروجك مسبقاً لهذا اليوم.', type: 'error' });
-            setIsSubmitting(false);
-            return;
+        if (hasOpenRecord) {
+          setMessage({ text: 'لديك سجل دخول نشط بالفعل. يرجى تسجيل الخروج أولاً عند انتهاء المناوبة.', type: 'error' });
+        } else {
+          // للموظف الإداري، نمنع تكرار الدخول في نفس اليوم
+          if (!isShiftWorker) {
+            const alreadyCheckedInToday = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === today);
+            if (alreadyCheckedInToday) {
+              setMessage({ text: 'لقد سجلت دخولك مسبقاً لهذا اليوم.', type: 'error' });
+              setIsSubmitting(false);
+              return;
+            }
           }
-        }
 
-        // C. Normal Check-In
-        const delay = !isShiftWorker
-          ? calculateDelay(currentSyncedTime, selectedCenter.defaultStartTime, selectedCenter.checkInGracePeriod)
-          : 0;
+          const delay = !isShiftWorker
+            ? calculateDelay(currentSyncedTime, selectedCenter.defaultStartTime, selectedCenter.checkInGracePeriod)
+            : 0; // نظام المناوبات لا يحسب التأخير الصباحي بنفس الطريقة الإدارية
 
-        const record: AttendanceRecord = {
-          id: crypto.randomUUID(),
-          employeeId: selectedEmployeeId,
-          centerId: selectedCenter.id,
-          date: today,
-          checkIn: currentSyncedTime.toISOString(),
-          status: delay > 0 ? 'late' : 'present',
-          delayMinutes: delay,
-          earlyDepartureMinutes: 0,
-          workingHours: 0,
-          ipAddress: userIP,
-          latitude: userLocation?.lat,
-          longitude: userLocation?.lon,
-          notes: delay > 0 ? `تأخير ${delay} دقيقة` : undefined
-        };
-        await addAttendance(record);
-
-        const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
-        setMessage({
-          text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح') + noteMessage,
-          type: 'success'
-        });
-
-      } else {
-        // type === 'out'
-
-        // A. Forgot Check-In (No active record)
-        if (!activeRecord) {
-          // Create Dummy Record
-          const nowIso = currentSyncedTime.toISOString();
           const record: AttendanceRecord = {
             id: crypto.randomUUID(),
             employeeId: selectedEmployeeId,
             centerId: selectedCenter.id,
             date: today,
-            checkIn: nowIso,
-            checkOut: nowIso,
-            checkOutDate: today,
-            status: 'absent', // Marked as problem
-            delayMinutes: 0,
+            checkIn: currentSyncedTime.toISOString(),
+            status: delay > 0 ? 'late' : 'present',
+            delayMinutes: delay,
             earlyDepartureMinutes: 0,
             workingHours: 0,
             ipAddress: userIP,
             latitude: userLocation?.lat,
-            longitude: userLocation?.lon,
-            notes: 'سجل ناقص - نسيان تسجيل الدخول (0 ساعات)'
+            longitude: userLocation?.lon
           };
           await addAttendance(record);
-          setMessage({
-            text: 'تم تسجيل الانصراف. تنبيه: لم يتم تسجيل دخولك صباحاً، راجع الإدارة لتعديل الوقت وإلا ستعتبر ساعات عملك (صفر).',
-            type: 'security'
+          const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
+          setMessage({ text: template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح', type: 'success' });
+        }
+      } else {
+        if (!hasOpenRecord) {
+          setMessage({ text: 'يرجى تسجيل الدخول أولاً.', type: 'error' });
+        } else {
+          const now = currentSyncedTime;
+
+          // الخروج المبكر يطبق فقط على الإداريين
+          const early = !isShiftWorker
+            ? calculateEarlyDeparture(now, selectedCenter.defaultEndTime, selectedCenter.checkOutGracePeriod)
+            : 0;
+
+          const hours = calculateWorkingHours(new Date(recentRecord.checkIn!), now);
+
+          await updateAttendance({
+            ...recentRecord,
+            checkOut: now.toISOString(),
+            checkOutDate: format(now, 'yyyy-MM-dd'),
+            earlyDepartureMinutes: early,
+            workingHours: hours,
+            latitude: userLocation?.lat,
+            longitude: userLocation?.lon
           });
-          setIsSubmitting(false);
-          return;
+          const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
+          setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
         }
-
-        // B. Already Checked Out
-        if (activeRecord && activeRecord.checkOut) {
-          setMessage({ text: 'لقد أتممت تسجيل انصرافك مسبقاً لهذا السجل.', type: 'error' });
-          setIsSubmitting(false);
-          return;
-        }
-
-        // C. Normal Check-Out
-        const now = currentSyncedTime;
-        const early = !isShiftWorker
-          ? calculateEarlyDeparture(now, selectedCenter.defaultEndTime, selectedCenter.checkOutGracePeriod)
-          : 0;
-
-        const hours = calculateWorkingHours(new Date(activeRecord.checkIn!), now);
-
-        await updateAttendance({
-          ...activeRecord,
-          checkOut: now.toISOString(),
-          checkOutDate: format(now, 'yyyy-MM-dd'),
-          earlyDepartureMinutes: early,
-          workingHours: hours,
-          latitude: userLocation?.lat,
-          longitude: userLocation?.lon
-        });
-
-        const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
-        setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
       }
-
+      refreshData('attendance');
     } catch (err) {
       console.error(err);
       setMessage({ text: 'حدث خطأ في النظام، يرجى إعادة المحاولة.', type: 'error' });
@@ -558,105 +479,6 @@ const AttendancePublic: React.FC = () => {
                 )}
               </div>
 
-              {/* حالة الموظف اليومية - جديد */}
-              {matchedCenter && selectedEmployeeId && (() => {
-                const todayStr = format(currentTime, 'yyyy-MM-dd');
-                const emp = employees.find(e => e.id === selectedEmployeeId);
-                const isShiftWorker = emp?.workType === 'shifts';
-
-                const employeeRecords = attendance.filter(a => a.employeeId === selectedEmployeeId);
-                const todayRecord = employeeRecords.find(a => a.date === todayStr);
-
-                // Find active record (shifts search all days, admin only today)
-                const activeRecord = isShiftWorker
-                  ? [...employeeRecords].find(a => !a.checkOut)
-                  : todayRecord;
-
-                if (!activeRecord) {
-                  return (
-                    <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400">
-                      <div className="flex items-center gap-3 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
-                        <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-slate-500">
-                          <Clock className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-500">الحالة الحالية</p>
-                          <p className="text-sm font-black text-slate-800">
-                            {isShiftWorker ? 'جاهز لبدء مناوبة جديدة' : 'لم يبدأ العمل اليوم'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400">
-                    {/* Shift Status Card */}
-                    {isShiftWorker && activeRecord && !activeRecord.checkOut && activeRecord.date !== todayStr && (
-                      <div className="mb-4 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center gap-3">
-                        <Activity className="w-5 h-5 text-indigo-600 animate-pulse" />
-                        <div>
-                          <p className="text-xs font-bold text-indigo-600">مناوبة مستمرة من يوم سابق</p>
-                          <p className="text-sm font-black text-slate-800">
-                            بدأت في {format(new Date(activeRecord.checkIn!), 'eeee dd MMMM', { locale: ar })}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className={`p-4 rounded-2xl border flex items-center gap-3 ${activeRecord.checkIn ? 'bg-emerald-50 border-emerald-100/50' : 'bg-slate-50 border-slate-100'
-                        }`}>
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${activeRecord.checkIn ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'
-                          }`}>
-                          <LogIn className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold opacity-70">وقت الدخول</p>
-                          <p className="text-sm font-black text-right" dir="ltr">
-                            {activeRecord.checkIn ? format(new Date(activeRecord.checkIn), 'hh:mm a', { locale: ar }) : '--:--'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className={`p-4 rounded-2xl border flex items-center gap-3 ${activeRecord.checkOut ? 'bg-indigo-50 border-indigo-100/50' : 'bg-slate-50 border-slate-100'
-                        }`}>
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${activeRecord.checkOut ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'
-                          }`}>
-                          <LogOut className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold opacity-70">وقت الخروج</p>
-                          <p className="text-sm font-black text-right" dir="ltr">
-                            {activeRecord.checkOut ? format(new Date(activeRecord.checkOut), 'hh:mm a', { locale: ar }) : '--:--'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* رسائل النظام - تم نقلها هنا */}
-              {message && (
-                <div className={`p-6 md:p-8 rounded-[2.5rem] border-2 shadow-sm animate-in zoom-in-95 duration-300 ${message.type === 'success' ? 'bg-emerald-50 border-emerald-100/50 text-emerald-800' :
-                  message.type === 'security' ? 'bg-rose-50 border-rose-100/50 text-rose-800' :
-                    'bg-amber-50 border-amber-100/50 text-amber-800'
-                  }`}>
-                  <div className="flex items-center gap-5">
-                    <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0 ${message.type === 'success' ? 'text-emerald-500' : 'text-rose-500'
-                      }`}>
-                      {message.type === 'success' ? <CheckCircle2 className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-black uppercase tracking-widest opacity-60">تنبيه النظام</p>
-                      <p className="text-base md:text-lg font-black leading-relaxed">{message.text}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {matchedCenter && (
                 <div className="flex flex-col md:flex-row gap-5 md:gap-6 pt-4 animate-in fade-in slide-in-from-top-4 duration-700 delay-500">
                   <button
@@ -689,7 +511,23 @@ const AttendancePublic: React.FC = () => {
             </div>
           )}
 
-
+          {message && (
+            <div className={`p-6 md:p-8 rounded-[2.5rem] border-2 shadow-sm animate-in zoom-in-95 duration-700 ${message.type === 'success' ? 'bg-emerald-50 border-emerald-100/50 text-emerald-800' :
+              message.type === 'security' ? 'bg-rose-50 border-rose-100/50 text-rose-800' :
+                'bg-amber-50 border-amber-100/50 text-amber-800'
+              }`}>
+              <div className="flex items-center gap-5">
+                <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0 ${message.type === 'success' ? 'text-emerald-500' : 'text-rose-500'
+                  }`}>
+                  {message.type === 'success' ? <CheckCircle2 className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-60">تنبيه النظام</p>
+                  <p className="text-base md:text-lg font-black leading-relaxed">{message.text}</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 px-10 py-6 bg-white/40 backdrop-blur-sm rounded-[2rem] border border-white/60 shadow-sm">
@@ -712,33 +550,31 @@ const AttendancePublic: React.FC = () => {
         </div>
       </div>
 
-      {
-        activeNotification && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-700">
-            <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] w-full max-w-lg shadow-[0_50px_100px_-20px_rgba(0,0,0,0.2)] overflow-hidden animate-in zoom-in-95 duration-500">
-              <div className="p-8 md:p-12 text-center space-y-6 md:space-y-8">
-                <div className="w-20 h-20 md:w-24 md:h-24 bg-indigo-50 text-indigo-600 rounded-[2rem] md:rounded-[2.5rem] flex items-center justify-center mx-auto shadow-inner">
-                  <BellRing className="w-10 h-10 md:w-12 md:h-12" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">{activeNotification.title}</h3>
-                  <p className="text-[9px] md:text-[10px] text-indigo-600 font-black uppercase tracking-[0.3em]">إدارة شؤون الموظفين</p>
-                </div>
-                <div className="bg-slate-50 p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-inner">
-                  <p className="text-slate-600 font-bold leading-loose text-base md:text-lg">{activeNotification.message}</p>
-                </div>
-                <button
-                  onClick={handleDismissNotif}
-                  className="w-full bg-slate-900 text-white font-black py-5 md:py-6 rounded-2xl md:rounded-[2.5rem] hover:bg-black transition-all flex items-center justify-center gap-3 uppercase text-[10px] md:text-xs tracking-widest active:scale-95 shadow-xl shadow-slate-900/20"
-                >
-                  <Check className="w-5 h-5 md:w-6 md:h-6 text-emerald-400" /> قرأت وأوافق
-                </button>
+      {activeNotification && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-700">
+          <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] w-full max-w-lg shadow-[0_50px_100px_-20px_rgba(0,0,0,0.2)] overflow-hidden animate-in zoom-in-95 duration-500">
+            <div className="p-8 md:p-12 text-center space-y-6 md:space-y-8">
+              <div className="w-20 h-20 md:w-24 md:h-24 bg-indigo-50 text-indigo-600 rounded-[2rem] md:rounded-[2.5rem] flex items-center justify-center mx-auto shadow-inner">
+                <BellRing className="w-10 h-10 md:w-12 md:h-12" />
               </div>
+              <div className="space-y-2">
+                <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">{activeNotification.title}</h3>
+                <p className="text-[9px] md:text-[10px] text-indigo-600 font-black uppercase tracking-[0.3em]">إدارة شؤون الموظفين</p>
+              </div>
+              <div className="bg-slate-50 p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-inner">
+                <p className="text-slate-600 font-bold leading-loose text-base md:text-lg">{activeNotification.message}</p>
+              </div>
+              <button
+                onClick={handleDismissNotif}
+                className="w-full bg-slate-900 text-white font-black py-5 md:py-6 rounded-2xl md:rounded-[2.5rem] hover:bg-black transition-all flex items-center justify-center gap-3 uppercase text-[10px] md:text-xs tracking-widest active:scale-95 shadow-xl shadow-slate-900/20"
+              >
+                <Check className="w-5 h-5 md:w-6 md:h-6 text-emerald-400" /> قرأت وأوافق
+              </button>
             </div>
           </div>
-        )
-      }
-    </div >
+        </div>
+      )}
+    </div>
   );
 };
 

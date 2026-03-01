@@ -17,7 +17,7 @@ const HolidaysPage: React.FC = () => {
     if (!name || !date) return;
 
     const newHoliday: Holiday = {
-      id: crypto.randomUUID(),
+      id: Math.random().toString(36).substr(2, 9),
       name,
       date
     };
@@ -66,7 +66,7 @@ const HolidaysPage: React.FC = () => {
                 <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-inner group-hover:rotate-6 transition-transform">
                   <Gift className="w-7 h-7" />
                 </div>
-                <button
+                <button 
                   onClick={() => deleteHoliday(holiday.id)}
                   className="p-2.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
                 >
@@ -75,7 +75,7 @@ const HolidaysPage: React.FC = () => {
               </div>
 
               <h3 className="text-xl font-black text-slate-900 mb-2">{holiday.name}</h3>
-
+              
               <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 mt-4">
                 <CalendarIcon className="w-5 h-5 text-indigo-500" />
                 <div>
@@ -86,7 +86,7 @@ const HolidaysPage: React.FC = () => {
                 </div>
               </div>
             </div>
-
+            
             <div className="absolute top-0 left-0 w-2 h-full bg-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
           </div>
         ))}

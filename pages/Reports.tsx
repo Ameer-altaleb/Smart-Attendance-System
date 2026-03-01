@@ -107,9 +107,6 @@ const ReportRow = memo(({
           )}
         </div>
       </td>
-      <td className="px-6 py-4 text-center">
-        <span className="text-[10px] font-bold text-rose-600">{record.notes || '-'}</span>
-      </td>
     </tr>
   );
 });
@@ -332,20 +329,17 @@ const Reports: React.FC = () => {
             let dayCheckOut = record.checkOut;
 
             if (isSameDay(day, start)) {
-              // First day: from checkIn to midnight
-              const startOfNextDay = startOfDay(new Date(day.getTime() + 24 * 60 * 60 * 1000));
-              workingHours = differenceInMinutes(startOfNextDay, start) / 60;
-              dayCheckOut = startOfNextDay.toISOString();
+              const eod = endOfDay(day);
+              workingHours = differenceInMinutes(eod, start) / 60;
+              dayCheckOut = eod.toISOString();
             } else if (isSameDay(day, end)) {
-              // Last day: from midnight to checkOut
               const sod = startOfDay(day);
               workingHours = differenceInMinutes(end, sod) / 60;
               dayCheckIn = sod.toISOString();
             } else {
-              // Middle days: full 24 hours
               workingHours = 24;
               dayCheckIn = startOfDay(day).toISOString();
-              dayCheckOut = startOfDay(new Date(day.getTime() + 24 * 60 * 60 * 1000)).toISOString();
+              dayCheckOut = endOfDay(day).toISOString();
             }
 
             processedAttendance.push({
@@ -469,7 +463,7 @@ const Reports: React.FC = () => {
             record.delayMinutes || 0,
             record.earlyDepartureMinutes || 0,
             record.workingHours || 0,
-            record.notes || note
+            note
           ];
         });
 
@@ -690,9 +684,8 @@ const Reports: React.FC = () => {
                 <th className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الحضور (مطلوب/فعلي)</th>
                 <th className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الانصراف (مطلوب/فعلي)</th>
                 <th className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">تأخير / مبكر</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الساعات</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الحالة</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">ملاحظات النظام</th>
+                <th className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الساعات</th>
+                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">ملاحظات الحالة</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -750,7 +743,6 @@ const Reports: React.FC = () => {
                 <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">تأخير/مبكر</th>
                 <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">ساعات</th>
                 <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الحالة</th>
-                <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">ملاحظات</th>
               </tr>
             </thead>
             <tbody>
@@ -774,9 +766,6 @@ const Reports: React.FC = () => {
                     <td className="px-3 py-1.5 border border-slate-300 text-center font-bold">{record.workingHours}h</td>
                     <td className="px-3 py-1.5 border border-slate-300 text-center">
                       {record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : 'معلق'}
-                    </td>
-                    <td className="px-3 py-1.5 border border-slate-300 text-center text-[10px] text-rose-600 font-bold">
-                      {record.notes || '-'}
                     </td>
                   </tr>
                 );

@@ -1,8 +1,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../store';
-import {
-  UserCog, Plus, Edit2, Trash2, X, Shield, Key, Mail, User,
+import { 
+  UserCog, Plus, Edit2, Trash2, X, Shield, Key, Mail, User, 
   ShieldCheck, Lock, Building2, Check, Ban, Unlock, ShieldAlert,
   Eye, EyeOff, Loader2, Save
 } from 'lucide-react';
@@ -40,7 +40,7 @@ const AdminsPage: React.FC = () => {
 
   const handleOpenAdd = () => {
     setEditingAdmin(null);
-    setName(''); setUsername(''); setPassword(''); setRole(UserRole.CENTER_MANAGER);
+    setName(''); setUsername(''); setPassword(''); setRole(UserRole.CENTER_MANAGER); 
     setManagedCenterIds([]); setIsBlocked(false); setShowPassword(false);
     setModalOpen(true);
   };
@@ -58,7 +58,7 @@ const AdminsPage: React.FC = () => {
   };
 
   const toggleCenter = (id: string) => {
-    setManagedCenterIds(prev =>
+    setManagedCenterIds(prev => 
       prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
     );
   };
@@ -95,7 +95,7 @@ const AdminsPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       const adminData: Admin = {
-        id: editingAdmin?.id || crypto.randomUUID(),
+        id: editingAdmin?.id || Math.random().toString(36).substr(2, 9),
         name,
         username: username.trim().toLowerCase(),
         password,
@@ -134,21 +134,23 @@ const AdminsPage: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
         {admins.map((admin) => (
-          <div key={admin.id} className={`bg-white rounded-[2.5rem] shadow-sm border-2 transition-all group overflow-hidden relative ${admin.isBlocked ? 'opacity-60 border-rose-100 grayscale' :
-              admin.username === ROOT_ADMIN_USERNAME ? 'border-indigo-100' : 'border-slate-50'
-            } hover:shadow-2xl hover:border-indigo-200`}>
-
+          <div key={admin.id} className={`bg-white rounded-[2.5rem] shadow-sm border-2 transition-all group overflow-hidden relative ${
+            admin.isBlocked ? 'opacity-60 border-rose-100 grayscale' : 
+            admin.username === ROOT_ADMIN_USERNAME ? 'border-indigo-100' : 'border-slate-50'
+          } hover:shadow-2xl hover:border-indigo-200`}>
+            
             <div className="p-8">
               <div className="flex items-start justify-between mb-6">
-                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner transition-transform group-hover:rotate-6 ${admin.username === ROOT_ADMIN_USERNAME ? 'bg-slate-900 text-white' :
-                    admin.id === currentUser?.id ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'
-                  }`}>
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner transition-transform group-hover:rotate-6 ${
+                   admin.username === ROOT_ADMIN_USERNAME ? 'bg-slate-900 text-white' : 
+                   admin.id === currentUser?.id ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'
+                }`}>
                   <Shield className="w-7 h-7" />
                 </div>
                 <div className="flex gap-1 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
                   {admin.username !== ROOT_ADMIN_USERNAME && (
-                    <button
-                      onClick={() => handleToggleBlock(admin)}
+                    <button 
+                      onClick={() => handleToggleBlock(admin)} 
                       className={`p-2 rounded-xl transition-all shadow-sm ${admin.isBlocked ? 'text-emerald-600 hover:bg-emerald-50' : 'text-rose-600 hover:bg-rose-50'}`}
                       title={admin.isBlocked ? 'تفعيل الدخول' : 'تعطيل الدخول'}
                     >
@@ -175,8 +177,9 @@ const AdminsPage: React.FC = () => {
                   <Mail className="w-3 h-3" /> {admin.username}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <span className={`inline-flex px-3 py-1 text-[9px] font-black rounded-full uppercase border ${admin.role === UserRole.SUPER_ADMIN ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-600 border-slate-200'
-                    }`}>
+                  <span className={`inline-flex px-3 py-1 text-[9px] font-black rounded-full uppercase border ${
+                    admin.role === UserRole.SUPER_ADMIN ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-600 border-slate-200'
+                  }`}>
                     {admin.role === UserRole.SUPER_ADMIN ? 'Super Admin' : admin.role === UserRole.GENERAL_MANAGER ? 'General Manager' : 'Center Manager'}
                   </span>
                   {admin.isBlocked && (
@@ -188,38 +191,39 @@ const AdminsPage: React.FC = () => {
               </div>
 
               <div className="space-y-4 pt-4 border-t border-slate-50">
-                <div className="flex items-center gap-2">
-                  <Key className="w-3.5 h-3.5 text-slate-300" />
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">كلمة السر المخزنة: </span>
-                  <span className="text-xs font-black text-slate-700">••••••••</span>
-                </div>
-
-                {admin.role !== UserRole.SUPER_ADMIN && (
-                  <div className="space-y-2">
-                    <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
-                      <Building2 className="w-3 h-3" /> المراكز المخصصة ({admin.managedCenterIds?.length || 0})
-                    </p>
-                    <div className="flex flex-wrap gap-1">
-                      {admin.managedCenterIds?.map(cid => (
-                        <span key={cid} className="px-2 py-1 bg-slate-50 text-slate-600 text-[8px] font-black rounded-lg border border-slate-100">
-                          {centers.find(c => c.id === cid)?.name || 'Unknown'}
-                        </span>
-                      ))}
-                      {(!admin.managedCenterIds || admin.managedCenterIds.length === 0) && (
-                        <span className="text-[9px] text-slate-300 font-bold italic">كامل الصلاحية</span>
-                      )}
-                    </div>
-                  </div>
-                )}
+                 <div className="flex items-center gap-2">
+                    <Key className="w-3.5 h-3.5 text-slate-300" />
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">كلمة السر المخزنة: </span>
+                    <span className="text-xs font-black text-slate-700">••••••••</span>
+                 </div>
+                 
+                 {admin.role !== UserRole.SUPER_ADMIN && (
+                   <div className="space-y-2">
+                      <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
+                        <Building2 className="w-3 h-3" /> المراكز المخصصة ({admin.managedCenterIds?.length || 0})
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                         {admin.managedCenterIds?.map(cid => (
+                           <span key={cid} className="px-2 py-1 bg-slate-50 text-slate-600 text-[8px] font-black rounded-lg border border-slate-100">
+                              {centers.find(c => c.id === cid)?.name || 'Unknown'}
+                           </span>
+                         ))}
+                         {(!admin.managedCenterIds || admin.managedCenterIds.length === 0) && (
+                           <span className="text-[9px] text-slate-300 font-bold italic">كامل الصلاحية</span>
+                         )}
+                      </div>
+                   </div>
+                 )}
               </div>
             </div>
 
-            <div className={`px-8 py-3 text-center border-t ${admin.isBlocked ? 'bg-rose-50 border-rose-100 text-rose-600' :
-                admin.id === currentUser?.id ? 'bg-indigo-50 border-indigo-100 text-indigo-600' : 'bg-slate-50 border-slate-100 text-slate-400'
-              }`}>
-              <span className="text-[10px] font-black uppercase tracking-widest">
-                {admin.isBlocked ? 'حساب معلق' : admin.id === currentUser?.id ? 'جلستك الحالية' : 'حساب نشط'}
-              </span>
+            <div className={`px-8 py-3 text-center border-t ${
+              admin.isBlocked ? 'bg-rose-50 border-rose-100 text-rose-600' : 
+              admin.id === currentUser?.id ? 'bg-indigo-50 border-indigo-100 text-indigo-600' : 'bg-slate-50 border-slate-100 text-slate-400'
+            }`}>
+               <span className="text-[10px] font-black uppercase tracking-widest">
+                 {admin.isBlocked ? 'حساب معلق' : admin.id === currentUser?.id ? 'جلستك الحالية' : 'حساب نشط'}
+               </span>
             </div>
           </div>
         ))}
@@ -235,7 +239,7 @@ const AdminsPage: React.FC = () => {
               </div>
               <button onClick={() => setModalOpen(false)} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:bg-slate-100 rounded-xl transition-colors"><X className="w-6 h-6" /></button>
             </div>
-
+            
             <form onSubmit={handleSubmit} className="p-8 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-5">
@@ -276,7 +280,7 @@ const AdminsPage: React.FC = () => {
                         dir="ltr"
                         placeholder="••••••••"
                       />
-                      <button
+                      <button 
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
                         className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
@@ -305,7 +309,7 @@ const AdminsPage: React.FC = () => {
                     {role === UserRole.SUPER_ADMIN ? (
                       <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
                         <ShieldCheck className="w-10 h-10 text-indigo-200" />
-                        <p className="text-[10px] font-black text-slate-400 italic uppercase">المشرف الأعلى يملك حق الوصول<br />لجميع المراكز تلقائياً</p>
+                        <p className="text-[10px] font-black text-slate-400 italic uppercase">المشرف الأعلى يملك حق الوصول<br/>لجميع المراكز تلقائياً</p>
                       </div>
                     ) : (
                       centers.map(center => (
@@ -313,10 +317,11 @@ const AdminsPage: React.FC = () => {
                           key={center.id}
                           type="button"
                           onClick={() => toggleCenter(center.id)}
-                          className={`w-full flex items-center justify-between p-4 rounded-xl transition-all border-2 ${managedCenterIds.includes(center.id)
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100'
-                              : 'bg-white text-slate-600 border-slate-50 hover:border-indigo-100'
-                            }`}
+                          className={`w-full flex items-center justify-between p-4 rounded-xl transition-all border-2 ${
+                            managedCenterIds.includes(center.id) 
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100' 
+                            : 'bg-white text-slate-600 border-slate-50 hover:border-indigo-100'
+                          }`}
                         >
                           <div className="flex items-center gap-3">
                             <Building2 className={`w-4 h-4 ${managedCenterIds.includes(center.id) ? 'text-white' : 'text-slate-300'}`} />
@@ -331,8 +336,8 @@ const AdminsPage: React.FC = () => {
               </div>
 
               <div className="flex gap-4 pt-6 border-t border-slate-50">
-                <button
-                  type="submit"
+                <button 
+                  type="submit" 
                   disabled={isSubmitting}
                   className="flex-2 bg-indigo-600 text-white font-black py-4 rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-600/20 flex-grow uppercase text-xs tracking-widest flex items-center justify-center gap-2"
                 >
