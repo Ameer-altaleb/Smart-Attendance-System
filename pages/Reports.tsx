@@ -105,6 +105,11 @@ const ReportRow = memo(({
               عطلة أسبوعية
             </span>
           )}
+          {record.notes && (
+            <span className="text-[8px] font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 uppercase text-center max-w-[120px]">
+              {record.notes}
+            </span>
+          )}
         </div>
       </td>
     </tr>
@@ -157,6 +162,12 @@ const ReportCard = memo(({
           {record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : 'معلق'}
         </span>
       </div>
+      {record.notes && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-rose-50 border border-rose-100 rounded-lg">
+          <AlertTriangle className="w-3 h-3 text-rose-500" />
+          <span className="text-[10px] font-black text-rose-600">{record.notes}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
@@ -450,6 +461,7 @@ const Reports: React.FC = () => {
           if (record.delayMinutes > 0) note += `تأخير ${record.delayMinutes}د. `;
           if (record.earlyDepartureMinutes > 0) note += `خروج مبكر ${record.earlyDepartureMinutes}د. `;
           if (record.status === 'present' && record.delayMinutes === 0) note = 'منضبط';
+          if (record.notes) note = note ? `${note} (${record.notes})` : record.notes;
 
           return [
             emp?.name || 'غير معروف',
@@ -765,7 +777,10 @@ const Reports: React.FC = () => {
                     </td>
                     <td className="px-3 py-1.5 border border-slate-300 text-center font-bold">{record.workingHours}h</td>
                     <td className="px-3 py-1.5 border border-slate-300 text-center">
-                      {record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : 'معلق'}
+                      <div className="flex flex-col">
+                        <span className="font-bold">{record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : 'معلق'}</span>
+                        {record.notes && <span className="text-[8px] text-rose-600 font-black">{record.notes}</span>}
+                      </div>
                     </td>
                   </tr>
                 );

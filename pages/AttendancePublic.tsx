@@ -270,9 +270,31 @@ const AttendancePublic: React.FC = () => {
       const hasOpenRecord = recentRecord && !recentRecord.checkOut;
 
       if (type === 'in') {
+        let shouldProceedIn = !hasOpenRecord;
+
         if (hasOpenRecord) {
-          setMessage({ text: 'لديك سجل دخول نشط بالفعل. يرجى تسجيل الخروج أولاً عند انتهاء المناوبة.', type: 'error' });
-        } else {
+          if (!isShiftWorker && recentRecord.date !== today) {
+            // إغلاق آلي للموظف الإداري الذي نسي البصمة
+            const [sH, sM] = selectedCenter.defaultStartTime.split(':').map(Number);
+            const [eH, eM] = selectedCenter.defaultEndTime.split(':').map(Number);
+            const totalMins = (eH * 60 + eM) - (sH * 60 + sM);
+            const penaltyHrs = totalMins > 0 ? (totalMins / 60) / 2 : 0;
+
+            await updateAttendance({
+              ...recentRecord,
+              checkOut: new Date(new Date(recentRecord.checkIn!).getTime() + (totalMins / 2) * 60000).toISOString(),
+              workingHours: Number(penaltyHrs.toFixed(2)),
+              notes: 'إغلاق آلي + خصم نسيان بصمة'
+            });
+            shouldProceedIn = true;
+          } else {
+            setMessage({ text: 'لديك سجل دخول نشط بالفعل. يرجى تسجيل الخروج أولاً عند انتهاء المناوبة.', type: 'error' });
+            setIsSubmitting(false);
+            return;
+          }
+        }
+
+        if (shouldProceedIn) {
           // للموظف الإداري، نمنع تكرار الدخول في نفس اليوم
           if (!isShiftWorker) {
             const alreadyCheckedInToday = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === today);
@@ -285,7 +307,7 @@ const AttendancePublic: React.FC = () => {
 
           const delay = !isShiftWorker
             ? calculateDelay(currentSyncedTime, selectedCenter.defaultStartTime, selectedCenter.checkInGracePeriod)
-            : 0; // نظام المناوبات لا يحسب التأخير الصباحي بنفس الطريقة الإدارية
+            : 0;
 
           const record: AttendanceRecord = {
             id: crypto.randomUUID(),
