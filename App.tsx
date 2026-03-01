@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './store.tsx';
-import { storageManager } from './utils/performance.ts';
 import Layout from './components/Layout.tsx';
 import AttendancePublic from './pages/AttendancePublic.tsx';
 import Dashboard from './pages/Dashboard.tsx';
@@ -20,19 +19,7 @@ import { UserRole, Admin } from './types.ts';
 const MainApp: React.FC = () => {
   const { currentUser, setCurrentUser, admins = [], settings } = useApp();
   const [activePage, setActivePage] = useState('dashboard');
-  const [view, setView] = useState<'public' | 'admin' | 'login'>(() => storageManager.load('view', 'public'));
-
-  // Persist view state
-  useEffect(() => {
-    storageManager.scheduleSave('view', view);
-  }, [view]);
-
-  // Handle automatic redirection for logged-in users
-  useEffect(() => {
-    if (currentUser && view === 'login') {
-      setView('admin');
-    }
-  }, [currentUser, view]);
+  const [view, setView] = useState<'public' | 'admin' | 'login'>('public');
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -216,25 +203,22 @@ const MainApp: React.FC = () => {
 
   return (
     <>
-      <div className="min-h-screen flex flex-col bg-[#f8fafc]">
-        <div className="flex-grow">
-          <AttendancePublic />
-        </div>
-        <footer className="pb-10 pt-4 flex justify-center">
-          <button
-            onClick={() => {
-              if (currentUser) {
-                setView('admin');
-              } else {
-                setView('login');
-              }
-            }}
-            className="text-[10px] text-slate-300 font-light hover:text-indigo-400 transition-colors tracking-widest"
-          >
-            - لوحة الادارة -
-          </button>
-        </footer>
+      <div className="fixed top-8 left-8 z-[100]">
+        <button
+          onClick={() => {
+            if (currentUser) {
+              setView('admin');
+            } else {
+              setView('login');
+            }
+          }}
+          className="w-14 h-14 bg-white text-slate-900 rounded-2xl border border-slate-100 hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center shadow-[0_15px_30px_rgba(0,0,0,0.1)] group active:scale-90"
+          title="إدارة النظام"
+        >
+          <SettingsIcon className="w-6 h-6 group-hover:rotate-90 transition-transform duration-700" />
+        </button>
       </div>
+      <AttendancePublic />
     </>
   );
 };

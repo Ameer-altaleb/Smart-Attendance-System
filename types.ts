@@ -31,7 +31,6 @@ export interface Employee {
   workingHours: number;
   joinedDate: string;
   deviceId?: string | null;
-  lastDeviceIdUpdate?: string | null;
   isActive: boolean;
   workType: 'administrative' | 'shifts';
   projectId?: string;
@@ -77,7 +76,6 @@ export interface AttendanceRecord {
   ipAddress?: string;
   latitude?: number;
   longitude?: number;
-  notes?: string;
 }
 
 export interface Holiday {

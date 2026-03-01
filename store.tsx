@@ -108,8 +108,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const fetchTable = useCallback(async (
     tableName: string,
     setter: (data: any) => void,
-    initial: any,
-    mergeStrategy: 'replace' | 'merge' = 'replace'
+    initial: any
   ) => {
     if (!checkSupabaseConnection() || !supabase) {
       setDbStatus(prev => ({ ...prev, [tableName]: 'online' }));
@@ -130,28 +129,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (error) throw error;
 
       if (data) {
+        // Special case for settings which is a single object
         if (tableName === 'settings' && data.length > 0) {
           setter(data[0]);
         } else {
-          if (mergeStrategy === 'merge') {
-            setter((prev: any[]) => {
-              const prevItems = Array.isArray(prev) ? prev : [];
-              // Logic: keep local items that are not in the server data (optimistic/unseen)
-              // or items that are newer in the server
-              const serverIds = new Set(data.map((item: any) => item.id));
-              const localOnly = prevItems.filter(item => !serverIds.has(item.id));
-              return [...data, ...localOnly];
-            });
-          } else {
-            // For general tables, if data is empty but we are in public view,
-            // we might want to avoid wiping local state if it's important (like attendance)
-            if (data.length === 0 && tableName === 'attendance') {
-              // Don't overwrite if we got empty response (could be RLS or connection hiccup)
-              console.log('Skipping attendance overwrite with empty server response');
-            } else {
-              setter(data);
-            }
-          }
+          setter(data);
         }
         setDbStatus(prev => ({ ...prev, [tableName]: 'online' }));
       }
@@ -169,24 +151,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           fetchTable('centers', setCenters, INITIAL_CENTERS),
           fetchTable('employees', setEmployees, INITIAL_EMPLOYEES),
           fetchTable('admins', setAdmins, INITIAL_ADMINS),
-          fetchTable('attendance', setAttendance, [], 'merge'), // Use merge for attendance
+          fetchTable('attendance', setAttendance, []),
           fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
           fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS),
           fetchTable('templates', setTemplates, INITIAL_TEMPLATES),
-          fetchTable('settings', setSettings, INITIAL_SETTINGS),
-          fetchTable('projects', setProjects, INITIAL_PROJECTS)
+          fetchTable('settings', setSettings, INITIAL_SETTINGS)
         ]);
       } else {
         const fetchTableMap: Record<string, () => Promise<void>> = {
           'centers': () => fetchTable('centers', setCenters, INITIAL_CENTERS),
           'employees': () => fetchTable('employees', setEmployees, INITIAL_EMPLOYEES),
-          'attendance': () => fetchTable('attendance', setAttendance, [], 'merge'),
+          'attendance': () => fetchTable('attendance', setAttendance, []),
           'settings': () => fetchTable('settings', setSettings, INITIAL_SETTINGS),
           'admins': () => fetchTable('admins', setAdmins, INITIAL_ADMINS),
           'holidays': () => fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
           'notifications': () => fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS),
           'templates': () => fetchTable('templates', setTemplates, INITIAL_TEMPLATES),
-          'projects': () => fetchTable('projects', setProjects, INITIAL_PROJECTS),
         };
         if (fetchTableMap[tableName]) await fetchTableMap[tableName]();
       }
@@ -218,133 +198,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     init();
-  }, [refreshData]);
-
-  // Real-time Database Subscriptions for the Entire System
-  useEffect(() => {
-    if (!checkSupabaseConnection() || !supabase) return;
-
-    const channel = supabase.channel('system-wide-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'attendance' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setAttendance(prev => prev.some(a => a.id === payload.new.id) ? prev : [...prev, payload.new as AttendanceRecord]);
-          } else if (payload.eventType === 'UPDATE') {
-            setAttendance(prev => prev.map(a => a.id === payload.new.id ? payload.new as AttendanceRecord : a));
-          } else if (payload.eventType === 'DELETE') {
-            setAttendance(prev => prev.filter(a => a.id !== payload.old.id));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'employees' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setEmployees(prev => prev.some(e => e.id === payload.new.id) ? prev : [...prev, payload.new as Employee]);
-          } else if (payload.eventType === 'UPDATE') {
-            setEmployees(prev => prev.map(e => e.id === payload.new.id ? payload.new as Employee : e));
-          } else if (payload.eventType === 'DELETE') {
-            setEmployees(prev => prev.filter(e => e.id !== payload.old.id));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'centers' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setCenters(prev => prev.some(c => c.id === payload.new.id) ? prev : [...prev, payload.new as Center]);
-          } else if (payload.eventType === 'UPDATE') {
-            setCenters(prev => prev.map(c => c.id === payload.new.id ? payload.new as Center : c));
-          } else if (payload.eventType === 'DELETE') {
-            setCenters(prev => prev.filter(c => c.id !== payload.old.id));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'projects' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setProjects(prev => prev.some(p => p.id === payload.new.id) ? prev : [...prev, payload.new as Project]);
-          } else if (payload.eventType === 'UPDATE') {
-            setProjects(prev => prev.map(p => p.id === payload.new.id ? payload.new as Project : p));
-          } else if (payload.eventType === 'DELETE') {
-            setProjects(prev => prev.filter(p => p.id !== payload.old.id));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'admins' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setAdmins(prev => prev.some(a => a.id === payload.new.id) ? prev : [...prev, payload.new as Admin]);
-          } else if (payload.eventType === 'UPDATE') {
-            setAdmins(prev => prev.map(a => a.id === payload.new.id ? payload.new as Admin : a));
-          } else if (payload.eventType === 'DELETE') {
-            setAdmins(prev => prev.filter(a => a.id !== payload.old.id));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'holidays' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setHolidays(prev => prev.some(h => h.id === payload.new.id) ? prev : [...prev, payload.new as Holiday]);
-          } else if (payload.eventType === 'UPDATE') {
-            setHolidays(prev => prev.map(h => h.id === payload.new.id ? payload.new as Holiday : h));
-          } else if (payload.eventType === 'DELETE') {
-            setHolidays(prev => prev.filter(h => h.id !== payload.old.id));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setNotifications(prev => prev.some(n => n.id === payload.new.id) ? prev : [...prev, payload.new as Notification]);
-          } else if (payload.eventType === 'UPDATE') {
-            setNotifications(prev => prev.map(n => n.id === payload.new.id ? payload.new as Notification : n));
-          } else if (payload.eventType === 'DELETE') {
-            setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'templates' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setTemplates(prev => prev.some(t => t.id === payload.new.id) ? prev : [...prev, payload.new as MessageTemplate]);
-          } else if (payload.eventType === 'UPDATE') {
-            setTemplates(prev => prev.map(t => t.id === payload.new.id ? payload.new as MessageTemplate : t));
-          } else if (payload.eventType === 'DELETE') {
-            setTemplates(prev => prev.filter(t => t.id !== payload.old.id));
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'settings' },
-        (payload) => {
-          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-            setSettings(payload.new as SystemSettings);
-          }
-        }
-      )
-      .subscribe((status) => {
-        setIsRealtimeConnected(status === 'SUBSCRIBED');
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   // Track pending operations
@@ -358,17 +211,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, []);
 
-  // Data Sanitizer to prevent DB errors
-  const sanitize = (obj: any) => {
-    if (typeof obj !== 'object' || obj === null) return obj;
-    const cleaned = { ...obj };
-    for (const key in cleaned) {
-      if (cleaned[key] === '') cleaned[key] = null;
-    }
-    return cleaned;
-  };
-
-  // Optimized database operations (Enhanced with error notifications)
+  // Optimized database operations (Mocked for Local-Only mode)
   const executeDbOperation = useCallback(async <T,>(
     tableName: string,
     operation: () => Promise<any>,
@@ -382,28 +225,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const { error } = await withRetry(async () => await operation());
         if (error) {
           console.error(`Database error in ${tableName}:`, error);
-          // Show visible error notification
-          setNotifications(prev => [...prev, {
-            id: crypto.randomUUID(),
-            title: 'خطأ في مزامنة البيانات',
-            message: `فشل الحفظ في جدول ${tableName}: ${error.message}`,
-            targetType: 'all',
-            senderName: 'النظام التقني',
-            sentAt: new Date().toISOString()
-          }]);
-        } else {
-          onSuccess?.();
+          // Still call onSuccess for optimistic UI consistency in local mode
         }
-      } else {
-        // Fallback for local mode
-        onSuccess?.();
       }
 
-      // Always clear pending status
+      // In all cases (even local mode), we simulate the async success
       setTimeout(() => {
+        onSuccess?.();
         updatePendingOps(tableName, -1);
-      }, 500);
-    } catch (error: any) {
+      }, 100);
+    } catch (error) {
       console.error(`Execution error in ${tableName}:`, error);
       updatePendingOps(tableName, -1);
     }
@@ -458,7 +289,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Notifications CRUD
   const addNotification = useCallback(async (n: Notification) => {
     setNotifications(prev => [...prev, n]);
-    return executeDbOperation('notifications', () => supabase!.from('notifications').insert(sanitize(n)));
+    executeDbOperation('notifications', () => supabase!.from('notifications').insert(n));
   }, [executeDbOperation]);
 
   const deleteNotification = useCallback(async (id: string) => {
