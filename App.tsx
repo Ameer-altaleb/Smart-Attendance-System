@@ -203,22 +203,25 @@ const MainApp: React.FC = () => {
 
   return (
     <>
-      <div className="fixed top-8 left-8 z-[100]">
-        <button
-          onClick={() => {
-            if (currentUser) {
-              setView('admin');
-            } else {
-              setView('login');
-            }
-          }}
-          className="w-14 h-14 bg-white text-slate-900 rounded-2xl border border-slate-100 hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center shadow-[0_15px_30px_rgba(0,0,0,0.1)] group active:scale-90"
-          title="إدارة النظام"
-        >
-          <SettingsIcon className="w-6 h-6 group-hover:rotate-90 transition-transform duration-700" />
-        </button>
+      <div className="min-h-screen flex flex-col bg-[#f8fafc]">
+        <div className="flex-grow">
+          <AttendancePublic />
+        </div>
+        <footer className="pb-10 pt-4 flex justify-center">
+          <button
+            onClick={() => {
+              if (currentUser) {
+                setView('admin');
+              } else {
+                setView('login');
+              }
+            }}
+            className="text-[10px] text-slate-300 font-light hover:text-indigo-400 transition-colors tracking-widest"
+          >
+            - لوحة الادارة -
+          </button>
+        </footer>
       </div>
-      <AttendancePublic />
     </>
   );
 };
