@@ -76,6 +76,7 @@ export interface AttendanceRecord {
   ipAddress?: string;
   latitude?: number;
   longitude?: number;
+  notes?: string;
 }
 
 export interface Holiday {
