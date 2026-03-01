@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './store.tsx';
+import { storageManager } from './utils/performance.ts';
 import Layout from './components/Layout.tsx';
 import AttendancePublic from './pages/AttendancePublic.tsx';
 import Dashboard from './pages/Dashboard.tsx';
@@ -19,7 +20,19 @@ import { UserRole, Admin } from './types.ts';
 const MainApp: React.FC = () => {
   const { currentUser, setCurrentUser, admins = [], settings } = useApp();
   const [activePage, setActivePage] = useState('dashboard');
-  const [view, setView] = useState<'public' | 'admin' | 'login'>('public');
+  const [view, setView] = useState<'public' | 'admin' | 'login'>(() => storageManager.load('view', 'public'));
+
+  // Persist view state
+  useEffect(() => {
+    storageManager.scheduleSave('view', view);
+  }, [view]);
+
+  // Handle automatic redirection for logged-in users
+  useEffect(() => {
+    if (currentUser && view === 'login') {
+      setView('admin');
+    }
+  }, [currentUser, view]);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');

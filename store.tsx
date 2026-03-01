@@ -108,7 +108,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const fetchTable = useCallback(async (
     tableName: string,
     setter: (data: any) => void,
-    initial: any
+    initial: any,
+    mergeStrategy: 'replace' | 'merge' = 'replace'
   ) => {
     if (!checkSupabaseConnection() || !supabase) {
       setDbStatus(prev => ({ ...prev, [tableName]: 'online' }));
@@ -129,11 +130,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (error) throw error;
 
       if (data) {
-        // Special case for settings which is a single object
         if (tableName === 'settings' && data.length > 0) {
           setter(data[0]);
         } else {
-          setter(data);
+          if (mergeStrategy === 'merge') {
+            setter((prev: any[]) => {
+              const prevItems = Array.isArray(prev) ? prev : [];
+              // Logic: keep local items that are not in the server data (optimistic/unseen)
+              // or items that are newer in the server
+              const serverIds = new Set(data.map((item: any) => item.id));
+              const localOnly = prevItems.filter(item => !serverIds.has(item.id));
+              return [...data, ...localOnly];
+            });
+          } else {
+            // For general tables, if data is empty but we are in public view,
+            // we might want to avoid wiping local state if it's important (like attendance)
+            if (data.length === 0 && tableName === 'attendance') {
+              // Don't overwrite if we got empty response (could be RLS or connection hiccup)
+              console.log('Skipping attendance overwrite with empty server response');
+            } else {
+              setter(data);
+            }
+          }
         }
         setDbStatus(prev => ({ ...prev, [tableName]: 'online' }));
       }
@@ -151,7 +169,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           fetchTable('centers', setCenters, INITIAL_CENTERS),
           fetchTable('employees', setEmployees, INITIAL_EMPLOYEES),
           fetchTable('admins', setAdmins, INITIAL_ADMINS),
-          fetchTable('attendance', setAttendance, []),
+          fetchTable('attendance', setAttendance, [], 'merge'), // Use merge for attendance
           fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
           fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS),
           fetchTable('templates', setTemplates, INITIAL_TEMPLATES),
@@ -162,7 +180,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const fetchTableMap: Record<string, () => Promise<void>> = {
           'centers': () => fetchTable('centers', setCenters, INITIAL_CENTERS),
           'employees': () => fetchTable('employees', setEmployees, INITIAL_EMPLOYEES),
-          'attendance': () => fetchTable('attendance', setAttendance, []),
+          'attendance': () => fetchTable('attendance', setAttendance, [], 'merge'),
           'settings': () => fetchTable('settings', setSettings, INITIAL_SETTINGS),
           'admins': () => fetchTable('admins', setAdmins, INITIAL_ADMINS),
           'holidays': () => fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
