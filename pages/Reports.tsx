@@ -332,17 +332,20 @@ const Reports: React.FC = () => {
             let dayCheckOut = record.checkOut;
 
             if (isSameDay(day, start)) {
-              const eod = endOfDay(day);
-              workingHours = differenceInMinutes(eod, start) / 60;
-              dayCheckOut = eod.toISOString();
+              // First day: from checkIn to midnight
+              const startOfNextDay = startOfDay(new Date(day.getTime() + 24 * 60 * 60 * 1000));
+              workingHours = differenceInMinutes(startOfNextDay, start) / 60;
+              dayCheckOut = startOfNextDay.toISOString();
             } else if (isSameDay(day, end)) {
+              // Last day: from midnight to checkOut
               const sod = startOfDay(day);
               workingHours = differenceInMinutes(end, sod) / 60;
               dayCheckIn = sod.toISOString();
             } else {
+              // Middle days: full 24 hours
               workingHours = 24;
               dayCheckIn = startOfDay(day).toISOString();
-              dayCheckOut = endOfDay(day).toISOString();
+              dayCheckOut = startOfDay(new Date(day.getTime() + 24 * 60 * 60 * 1000)).toISOString();
             }
 
             processedAttendance.push({

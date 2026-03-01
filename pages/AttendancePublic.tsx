@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import {
   LogIn, LogOut, CheckCircle2, ShieldAlert, Smartphone,
-  BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown
+  BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown, Activity
 } from 'lucide-react';
 import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance } from '../utils/attendanceLogic.ts';
 import { AttendanceRecord, Employee, Notification, Center } from '../types.ts';
@@ -238,12 +238,24 @@ const AttendancePublic: React.FC = () => {
       if (!localEmployee) throw new Error('Employee record missing');
 
       if (localEmployee.deviceId && localEmployee.deviceId !== currentDeviceId) {
-        setMessage({
-          text: 'خطأ أمني: هذا الحساب مرتبط بجهاز آخر. لا يسمح بتسجيل الدخول إلا من جهازك الشخصي المسجل مسبقاً.',
-          type: 'security'
-        });
-        setIsSubmitting(false);
-        return;
+        // Silent 24-hour Re-linking Logic
+        if (localEmployee.lastDeviceIdUpdate !== today) {
+          // Perform silent update and proceed
+          await updateEmployee({
+            ...localEmployee,
+            deviceId: currentDeviceId,
+            lastDeviceIdUpdate: today
+          });
+          // Proceed normally - No error message shown to user
+        } else {
+          // Already updated today, show existing error
+          setMessage({
+            text: 'خطأ أمني: هذا الحساب مرتبط بجهاز آخر. لا يسمح بتسجيل الدخول إلا من جهازك الشخصي المسجل مسبقاً.',
+            type: 'security'
+          });
+          setIsSubmitting(false);
+          return;
+        }
       }
 
       const conflict = employees.find(e => e.deviceId === currentDeviceId && e.id !== selectedEmployeeId);
@@ -262,10 +274,18 @@ const AttendancePublic: React.FC = () => {
 
       const isShiftWorker = localEmployee.workType === 'shifts';
 
-      // --- Logic Update for Forgotten Actions ---
+      // --- Logic Update for Cross-day Shifts ---
 
       const employeeRecords = attendance.filter(a => a.employeeId === selectedEmployeeId);
       const todayRecord = employeeRecords.find(a => a.date === today);
+
+      // For shift workers, we look for the last OPEN record regardless of the date
+      // For admin workers, we only care about today's record
+      const activeRecord = isShiftWorker
+        ? [...employeeRecords].find(a => !a.checkOut)
+        : todayRecord;
+
+      // lastRecord is used for the forgotten-checkout logic (mostly for admin workers)
       const lastRecord = [...employeeRecords].sort((a, b) => new Date(b.checkIn!).getTime() - new Date(a.checkIn!).getTime())[0];
 
       let noteMessage = '';
@@ -288,17 +308,16 @@ const AttendancePublic: React.FC = () => {
         }
 
         // B. Check for Today's Status
-        if (todayRecord) {
-          if (!todayRecord.checkOut) {
-            setMessage({ text: 'لديك سجل دخول نشط بالفعل لهذا اليوم.', type: 'error' });
+        if (activeRecord) {
+          if (!activeRecord.checkOut) {
+            const startDate = activeRecord.date !== today ? format(new Date(activeRecord.checkIn!), 'eeee (dd-MM)', { locale: ar }) : 'اليوم';
+            setMessage({ text: `لديك سجل دخول نشط بالفعل بدأ ${startDate}. يجب تسجيل الانصراف أولاً.`, type: 'error' });
             setIsSubmitting(false);
             return;
-          } else {
-            if (!isShiftWorker) {
-              setMessage({ text: 'لقد سجلت دخولك وخروجك مسبقاً لهذا اليوم.', type: 'error' });
-              setIsSubmitting(false);
-              return;
-            }
+          } else if (!isShiftWorker) {
+            setMessage({ text: 'لقد سجلت دخولك وخروجك مسبقاً لهذا اليوم.', type: 'error' });
+            setIsSubmitting(false);
+            return;
           }
         }
 
@@ -333,8 +352,8 @@ const AttendancePublic: React.FC = () => {
       } else {
         // type === 'out'
 
-        // A. Forgot Check-In (No record for today)
-        if (!todayRecord) {
+        // A. Forgot Check-In (No active record)
+        if (!activeRecord) {
           // Create Dummy Record
           const nowIso = currentSyncedTime.toISOString();
           const record: AttendanceRecord = {
@@ -364,8 +383,8 @@ const AttendancePublic: React.FC = () => {
         }
 
         // B. Already Checked Out
-        if (todayRecord.checkOut) {
-          setMessage({ text: 'لقد أتممت تسجيل انصرافك لهذا اليوم مسبقاً.', type: 'error' });
+        if (activeRecord && activeRecord.checkOut) {
+          setMessage({ text: 'لقد أتممت تسجيل انصرافك مسبقاً لهذا السجل.', type: 'error' });
           setIsSubmitting(false);
           return;
         }
@@ -376,10 +395,10 @@ const AttendancePublic: React.FC = () => {
           ? calculateEarlyDeparture(now, selectedCenter.defaultEndTime, selectedCenter.checkOutGracePeriod)
           : 0;
 
-        const hours = calculateWorkingHours(new Date(todayRecord.checkIn!), now);
+        const hours = calculateWorkingHours(new Date(activeRecord.checkIn!), now);
 
         await updateAttendance({
-          ...todayRecord,
+          ...activeRecord,
           checkOut: now.toISOString(),
           checkOutDate: format(now, 'yyyy-MM-dd'),
           earlyDepartureMinutes: early,
@@ -542,51 +561,79 @@ const AttendancePublic: React.FC = () => {
               {/* حالة الموظف اليومية - جديد */}
               {matchedCenter && selectedEmployeeId && (() => {
                 const todayStr = format(currentTime, 'yyyy-MM-dd');
-                const todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
+                const emp = employees.find(e => e.id === selectedEmployeeId);
+                const isShiftWorker = emp?.workType === 'shifts';
 
-                return (
-                  <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400">
-                    {!todayRecord ? (
+                const employeeRecords = attendance.filter(a => a.employeeId === selectedEmployeeId);
+                const todayRecord = employeeRecords.find(a => a.date === todayStr);
+
+                // Find active record (shifts search all days, admin only today)
+                const activeRecord = isShiftWorker
+                  ? [...employeeRecords].find(a => !a.checkOut)
+                  : todayRecord;
+
+                if (!activeRecord) {
+                  return (
+                    <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400">
                       <div className="flex items-center gap-3 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
                         <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-slate-500">
                           <Clock className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-slate-500">الحالة اليومية</p>
-                          <p className="text-sm font-black text-slate-800">لم يبدأ العمل بعد</p>
+                          <p className="text-xs font-bold text-slate-500">الحالة الحالية</p>
+                          <p className="text-sm font-black text-slate-800">
+                            {isShiftWorker ? 'جاهز لبدء مناوبة جديدة' : 'لم يبدأ العمل اليوم'}
+                          </p>
                         </div>
                       </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className={`p-4 rounded-2xl border flex items-center gap-3 ${todayRecord.checkIn ? 'bg-emerald-50 border-emerald-100/50' : 'bg-slate-50 border-slate-100'
-                          }`}>
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${todayRecord.checkIn ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'
-                            }`}>
-                            <LogIn className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-bold opacity-70">وقت الدخول</p>
-                            <p className="text-sm font-black">
-                              {todayRecord.checkIn ? format(new Date(todayRecord.checkIn), 'hh:mm a', { locale: ar }) : '--:--'}
-                            </p>
-                          </div>
-                        </div>
+                    </div>
+                  );
+                }
 
-                        <div className={`p-4 rounded-2xl border flex items-center gap-3 ${todayRecord.checkOut ? 'bg-indigo-50 border-indigo-100/50' : 'bg-slate-50 border-slate-100'
-                          }`}>
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${todayRecord.checkOut ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'
-                            }`}>
-                            <LogOut className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-bold opacity-70">وقت الخروج</p>
-                            <p className="text-sm font-black">
-                              {todayRecord.checkOut ? format(new Date(todayRecord.checkOut), 'hh:mm a', { locale: ar }) : '--:--'}
-                            </p>
-                          </div>
+                return (
+                  <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400">
+                    {/* Shift Status Card */}
+                    {isShiftWorker && activeRecord && !activeRecord.checkOut && activeRecord.date !== todayStr && (
+                      <div className="mb-4 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center gap-3">
+                        <Activity className="w-5 h-5 text-indigo-600 animate-pulse" />
+                        <div>
+                          <p className="text-xs font-bold text-indigo-600">مناوبة مستمرة من يوم سابق</p>
+                          <p className="text-sm font-black text-slate-800">
+                            بدأت في {format(new Date(activeRecord.checkIn!), 'eeee dd MMMM', { locale: ar })}
+                          </p>
                         </div>
                       </div>
                     )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className={`p-4 rounded-2xl border flex items-center gap-3 ${activeRecord.checkIn ? 'bg-emerald-50 border-emerald-100/50' : 'bg-slate-50 border-slate-100'
+                        }`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${activeRecord.checkIn ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'
+                          }`}>
+                          <LogIn className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold opacity-70">وقت الدخول</p>
+                          <p className="text-sm font-black text-right" dir="ltr">
+                            {activeRecord.checkIn ? format(new Date(activeRecord.checkIn), 'hh:mm a', { locale: ar }) : '--:--'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className={`p-4 rounded-2xl border flex items-center gap-3 ${activeRecord.checkOut ? 'bg-indigo-50 border-indigo-100/50' : 'bg-slate-50 border-slate-100'
+                        }`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${activeRecord.checkOut ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'
+                          }`}>
+                          <LogOut className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold opacity-70">وقت الخروج</p>
+                          <p className="text-sm font-black text-right" dir="ltr">
+                            {activeRecord.checkOut ? format(new Date(activeRecord.checkOut), 'hh:mm a', { locale: ar }) : '--:--'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
