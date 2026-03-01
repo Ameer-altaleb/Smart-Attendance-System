@@ -31,6 +31,7 @@ export interface Employee {
   workingHours: number;
   joinedDate: string;
   deviceId?: string | null;
+  lastDeviceIdUpdate?: string | null;
   isActive: boolean;
   workType: 'administrative' | 'shifts';
   projectId?: string;
