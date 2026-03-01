@@ -479,6 +479,67 @@ const AttendancePublic: React.FC = () => {
                 )}
               </div>
 
+              {matchedCenter && selectedEmployeeId && (() => {
+                const todayStr = format(currentTime, 'yyyy-MM-dd');
+                const todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
+
+                return (
+                  <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400 space-y-4">
+                    {/* حالة الموظف اليومية */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className={`p-4 rounded-2xl border flex items-center gap-3 ${todayRecord?.checkIn ? 'bg-emerald-50 border-emerald-100/50' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${todayRecord?.checkIn ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>
+                          <LogIn className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold opacity-70">وقت الدخول</p>
+                          <p className="text-sm font-black text-right" dir="ltr">
+                            {todayRecord?.checkIn ? format(new Date(todayRecord.checkIn), 'hh:mm a', { locale: ar }) : '--:--'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className={`p-4 rounded-2xl border flex items-center gap-3 ${todayRecord?.checkOut ? 'bg-indigo-50 border-indigo-100/50' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${todayRecord?.checkOut ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
+                          <LogOut className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold opacity-70">وقت الخروج</p>
+                          <p className="text-sm font-black text-right" dir="ltr">
+                            {todayRecord?.checkOut ? format(new Date(todayRecord.checkOut), 'hh:mm a', { locale: ar }) : '--:--'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {!todayRecord && (
+                      <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-center gap-3">
+                        <Clock className="w-5 h-5 text-amber-500" />
+                        <p className="text-sm font-black text-amber-800">لم تبدأ العمل اليوم بعد</p>
+                      </div>
+                    )}
+
+                    {/* رسائل النظام - موضع جديد */}
+                    {message && (
+                      <div className={`p-6 rounded-[2rem] border-2 shadow-sm animate-in zoom-in-95 duration-300 ${message.type === 'success' ? 'bg-emerald-50 border-emerald-100/50 text-emerald-800' :
+                        message.type === 'security' ? 'bg-rose-50 border-rose-100/50 text-rose-800' :
+                          'bg-amber-50 border-amber-100/50 text-amber-800'
+                        }`}>
+                        <div className="flex items-center gap-5">
+                          <div className={`w-12 h-12 rounded-xl bg-white shadow-md flex items-center justify-center shrink-0 ${message.type === 'success' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {message.type === 'success' ? <CheckCircle2 className="w-6 h-6" /> : <ShieldAlert className="w-6 h-6" />}
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-[9px] font-black uppercase tracking-widest opacity-60">تنبيه النظام</p>
+                            <p className="text-sm font-black leading-tight">{message.text}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {matchedCenter && (
                 <div className="flex flex-col md:flex-row gap-5 md:gap-6 pt-4 animate-in fade-in slide-in-from-top-4 duration-700 delay-500">
                   <button
@@ -508,24 +569,6 @@ const AttendancePublic: React.FC = () => {
                   </button>
                 </div>
               )}
-            </div>
-          )}
-
-          {message && (
-            <div className={`p-6 md:p-8 rounded-[2.5rem] border-2 shadow-sm animate-in zoom-in-95 duration-700 ${message.type === 'success' ? 'bg-emerald-50 border-emerald-100/50 text-emerald-800' :
-              message.type === 'security' ? 'bg-rose-50 border-rose-100/50 text-rose-800' :
-                'bg-amber-50 border-amber-100/50 text-amber-800'
-              }`}>
-              <div className="flex items-center gap-5">
-                <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0 ${message.type === 'success' ? 'text-emerald-500' : 'text-rose-500'
-                  }`}>
-                  {message.type === 'success' ? <CheckCircle2 className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-60">تنبيه النظام</p>
-                  <p className="text-base md:text-lg font-black leading-relaxed">{message.text}</p>
-                </div>
-              </div>
             </div>
           )}
         </div>
