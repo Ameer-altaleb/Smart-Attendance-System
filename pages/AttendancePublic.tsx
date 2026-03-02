@@ -257,6 +257,8 @@ const AttendancePublic: React.FC = () => {
 
       if (!localEmployee.deviceId) {
         await updateEmployee({ ...localEmployee, deviceId: currentDeviceId });
+        // Use a small delay to ensure the store update is processed
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
       const today = format(currentSyncedTime, 'yyyy-MM-dd');
@@ -324,6 +326,10 @@ const AttendancePublic: React.FC = () => {
             longitude: userLocation?.lon
           };
           await addAttendance(record);
+
+          // Re-fetch only if necessary and after a small delay to allow DB consistency
+          setTimeout(() => refreshData('attendance'), 1000);
+
           const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
           setMessage({ text: template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح', type: 'success' });
         }
@@ -349,11 +355,15 @@ const AttendancePublic: React.FC = () => {
             latitude: userLocation?.lat,
             longitude: userLocation?.lon
           });
+
+          // Re-fetch only if necessary and after a small delay
+          setTimeout(() => refreshData('attendance'), 1000);
+
           const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
           setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
         }
       }
-      refreshData('attendance');
+      // Removed immediate refreshData('attendance') to prevent race condition
     } catch (err) {
       console.error(err);
       setMessage({ text: 'حدث خطأ في النظام، يرجى إعادة المحاولة.', type: 'error' });
