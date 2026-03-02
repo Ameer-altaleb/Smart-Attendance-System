@@ -108,7 +108,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const fetchTable = useCallback(async (
     tableName: string,
     setter: (data: any) => void,
-    initial: any
+    initial: any,
+    mergeStrategy: 'replace' | 'merge' = 'replace'
   ) => {
     if (!checkSupabaseConnection() || !supabase) {
       setDbStatus(prev => ({ ...prev, [tableName]: 'online' }));
@@ -132,6 +133,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         // Special case for settings which is a single object
         if (tableName === 'settings' && data.length > 0) {
           setter(data[0]);
+        } else if (mergeStrategy === 'merge') {
+          setter((prev: any[]) => {
+            // Create a map of existing items for quick lookup
+            const existingMap = new Map(prev.map(item => [item.id, item]));
+
+            // Update with new data from server
+            data.forEach((newItem: any) => {
+              existingMap.set(newItem.id, newItem);
+            });
+
+            return Array.from(existingMap.values());
+          });
         } else {
           setter(data);
         }
@@ -151,7 +164,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           fetchTable('centers', setCenters, INITIAL_CENTERS),
           fetchTable('employees', setEmployees, INITIAL_EMPLOYEES),
           fetchTable('admins', setAdmins, INITIAL_ADMINS),
-          fetchTable('attendance', setAttendance, []),
+          fetchTable('attendance', setAttendance, [], 'merge'),
           fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
           fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS),
           fetchTable('templates', setTemplates, INITIAL_TEMPLATES),
@@ -161,7 +174,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const fetchTableMap: Record<string, () => Promise<void>> = {
           'centers': () => fetchTable('centers', setCenters, INITIAL_CENTERS),
           'employees': () => fetchTable('employees', setEmployees, INITIAL_EMPLOYEES),
-          'attendance': () => fetchTable('attendance', setAttendance, []),
+          'attendance': () => fetchTable('attendance', setAttendance, [], 'merge'),
           'settings': () => fetchTable('settings', setSettings, INITIAL_SETTINGS),
           'admins': () => fetchTable('admins', setAdmins, INITIAL_ADMINS),
           'holidays': () => fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
