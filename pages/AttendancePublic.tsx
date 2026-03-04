@@ -519,7 +519,7 @@ const AttendancePublic: React.FC = () => {
                   <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400 space-y-4">
                     {/* حالة الموظف اليومية */}
                     <div className="grid grid-cols-2 gap-3">
-                      <div className={`p-4 rounded-2xl border flex items-center gap-3 ${todayRecord?.checkIn ? 'bg-emerald-50 border-emerald-100/50' : 'bg-slate-50 border-slate-100'}`}>
+                      <div className={`p-4 rounded-2xl border flex items-center gap-3 relative ${todayRecord?.checkIn ? 'bg-emerald-50 border-emerald-100/50' : 'bg-slate-50 border-slate-100'}`}>
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${todayRecord?.checkIn ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>
                           <LogIn className="w-5 h-5" />
                         </div>
@@ -529,9 +529,20 @@ const AttendancePublic: React.FC = () => {
                             {todayRecord?.checkIn ? format(new Date(todayRecord.checkIn), 'hh:mm a', { locale: ar }) : '--:--'}
                           </p>
                         </div>
+                        {todayRecord?.checkIn && (
+                          <div className="absolute top-2 left-2">
+                            {todayRecord.syncStatus === 'synced' ? (
+                              <CheckCircle2 className="w-3 h-3 text-emerald-500" title="تمت المزامنة" />
+                            ) : todayRecord.syncStatus === 'pending' ? (
+                              <Loader2 className="w-3 h-3 text-amber-500 animate-spin" title="جاري المزامنة..." />
+                            ) : todayRecord.syncStatus === 'failed' ? (
+                              <AlertTriangle className="w-3 h-3 text-rose-500" title="فشلت المزامنة - سيتم المحاولة لاحقاً" />
+                            ) : null}
+                          </div>
+                        )}
                       </div>
 
-                      <div className={`p-4 rounded-2xl border flex items-center gap-3 ${todayRecord?.checkOut ? 'bg-indigo-50 border-indigo-100/50' : 'bg-slate-50 border-slate-100'}`}>
+                      <div className={`p-4 rounded-2xl border flex items-center gap-3 relative ${todayRecord?.checkOut ? 'bg-indigo-50 border-indigo-100/50' : 'bg-slate-50 border-slate-100'}`}>
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${todayRecord?.checkOut ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
                           <LogOut className="w-5 h-5" />
                         </div>
@@ -541,6 +552,17 @@ const AttendancePublic: React.FC = () => {
                             {todayRecord?.checkOut ? format(new Date(todayRecord.checkOut), 'hh:mm a', { locale: ar }) : '--:--'}
                           </p>
                         </div>
+                        {todayRecord?.checkOut && (
+                          <div className="absolute top-2 left-2">
+                            {todayRecord.syncStatus === 'synced' ? (
+                              <CheckCircle2 className="w-3 h-3 text-emerald-500" title="تمت المزامنة" />
+                            ) : todayRecord.syncStatus === 'pending' ? (
+                              <Loader2 className="w-3 h-3 text-amber-500 animate-spin" title="جاري المزامنة..." />
+                            ) : todayRecord.syncStatus === 'failed' ? (
+                              <AlertTriangle className="w-3 h-3 text-rose-500" title="فشلت المزامنة - سيتم المحاولة لاحقاً" />
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     </div>
 
