@@ -77,6 +77,7 @@ export interface AttendanceRecord {
   latitude?: number;
   longitude?: number;
   notes?: string;
+  syncStatus?: 'synced' | 'pending' | 'failed';
 }
 
 export interface Holiday {

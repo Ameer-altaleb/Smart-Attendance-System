@@ -11,7 +11,7 @@ import {
   INITIAL_PROJECTS
 } from './constants.tsx';
 import { supabase, checkSupabaseConnection } from './lib/supabase.ts';
-import { storageManager, requestQueue, withRetry, debounce } from './utils/performance.ts';
+import { storageManager, requestQueue, withRetry, debounce, connectionMonitor } from './utils/performance.ts';
 
 interface AppContextType {
   centers: Center[];
@@ -51,6 +51,7 @@ interface AppContextType {
   deleteProject: (id: string) => Promise<void>;
   refreshData: (tableName?: string) => Promise<void>;
   testConnection: () => Promise<void>;
+  retrySync: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -228,27 +229,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const executeDbOperation = useCallback(async <T,>(
     tableName: string,
     operation: () => Promise<any>,
-    onSuccess?: () => void
+    onComplete?: (success: boolean) => void
   ): Promise<void> => {
     updatePendingOps(tableName, 1);
+    let success = false;
 
     try {
-      // Execute the actual operation if supabase is configured
       if (checkSupabaseConnection() && supabase) {
         const { error } = await withRetry(async () => await operation());
         if (error) {
           console.error(`Database error in ${tableName}:`, error);
-          // Still call onSuccess for optimistic UI consistency in local mode
+          success = false;
+        } else {
+          success = true;
         }
+      } else {
+        // If no connection, we consider it a "local success" but pending sync
+        success = false;
       }
 
-      // In all cases (even local mode), we simulate the async success
-      setTimeout(() => {
-        onSuccess?.();
-        updatePendingOps(tableName, -1);
-      }, 100);
+      onComplete?.(success);
+      updatePendingOps(tableName, -1);
     } catch (error) {
       console.error(`Execution error in ${tableName}:`, error);
+      onComplete?.(false);
       updatePendingOps(tableName, -1);
     }
   }, [updatePendingOps]);
@@ -290,13 +294,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Attendance CRUD with optimistic updates
   const addAttendance = useCallback(async (r: AttendanceRecord) => {
-    setAttendance(prev => [...prev, r]);
-    executeDbOperation('attendance', () => supabase!.from('attendance').insert(r));
+    const record = { ...r, syncStatus: 'pending' as const };
+    setAttendance(prev => [...prev, record]);
+    executeDbOperation('attendance',
+      () => supabase!.from('attendance').insert(r),
+      (success) => {
+        if (success) {
+          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
+        } else {
+          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
+        }
+      }
+    );
   }, [executeDbOperation]);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord) => {
-    setAttendance(prev => prev.map(item => item.id === r.id ? r : item));
-    executeDbOperation('attendance', () => supabase!.from('attendance').update(r).eq('id', r.id));
+    const record = { ...r, syncStatus: 'pending' as const };
+    setAttendance(prev => prev.map(item => item.id === r.id ? record : item));
+    executeDbOperation('attendance',
+      () => supabase!.from('attendance').update(r).eq('id', r.id),
+      (success) => {
+        if (success) {
+          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
+        } else {
+          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
+        }
+      }
+    );
   }, [executeDbOperation]);
 
   // Notifications CRUD
@@ -348,6 +372,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     executeDbOperation('holidays', () => supabase!.from('holidays').delete().eq('id', id));
   }, [executeDbOperation]);
 
+  // Retry sync for pending items
+  const retrySync = useCallback(async () => {
+    const pending = attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed');
+    if (pending.length === 0) return;
+
+    for (const record of pending) {
+      executeDbOperation('attendance',
+        () => supabase!.from('attendance').upsert(record),
+        (success) => {
+          if (success) {
+            setAttendance(prev => prev.map(item => item.id === record.id ? { ...item, syncStatus: 'synced' } : item));
+          }
+        }
+      );
+    }
+  }, [attendance, executeDbOperation]);
+
+  // Automatic retry on connection restore
+  useEffect(() => {
+    const unsubscribe = connectionMonitor.subscribe((online) => {
+      if (online) {
+        retrySync();
+      }
+    });
+    return unsubscribe;
+  }, [retrySync]);
+
   // Projects CRUD
   const addProject = useCallback(async (p: Project) => {
     setProjects(prev => [...prev, p]);
@@ -372,14 +423,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setCurrentUser, addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee,
     deleteEmployee, addAttendance, updateAttendance, addNotification, deleteNotification,
     updateTemplate, updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday,
-    deleteHoliday, addProject, updateProject, deleteProject, refreshData, testConnection
+    deleteHoliday, addProject, updateProject, deleteProject, refreshData, testConnection,
+    retrySync
   }), [
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
     currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations, refreshData,
     addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee, deleteEmployee,
     addAttendance, updateAttendance, addNotification, deleteNotification, updateTemplate,
     updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday, deleteHoliday,
-    addProject, updateProject, deleteProject
+    addProject, updateProject, deleteProject, executeDbOperation
   ]);
 
   return (
