@@ -807,43 +807,49 @@ const Reports: React.FC = () => {
                   </div>
                 </div>
 
-                <table className="w-full text-right border-collapse text-xs mb-8">
-                  <thead>
-                    <tr className="bg-slate-100 border-2 border-slate-900">
-                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">التاريخ</th>
-                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الحضور</th>
-                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الانصراف</th>
-                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">تأخير/مبكر</th>
-                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">ساعات</th>
-                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الحالة</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {records.map((record: any) => {
-                      return (
-                        <tr key={record.id} className="border border-slate-300">
-                          <td className="px-3 py-1.5 border border-slate-300 text-center font-bold text-slate-700">{record.date}</td>
-                          <td className="px-3 py-1.5 border border-slate-300 text-center">
-                            {record.checkIn ? format(new Date(record.checkIn), 'HH:mm') : '--:--'}
-                          </td>
-                          <td className="px-3 py-1.5 border border-slate-300 text-center">
-                            {record.checkOut ? format(new Date(record.checkOut), 'HH:mm') : '--:--'}
-                          </td>
-                          <td className="px-3 py-1.5 border border-slate-300 text-center">
-                            {record.delayMinutes || 0}د / {record.earlyDepartureMinutes || 0}د
-                          </td>
-                          <td className="px-3 py-1.5 border border-slate-300 text-center font-black">{record.workingHours}h</td>
-                          <td className="px-3 py-1.5 border border-slate-300 text-center">
-                            <div className="flex flex-col items-center">
-                              <span className="font-bold">{record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : record.status === 'absent' ? 'غياب' : 'معلق'}</span>
-                              {record.notes && <span className="text-[8px] text-rose-600 font-black">{record.notes}</span>}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="grid grid-cols-2 gap-6 w-full mb-2">
+                  {[records.slice(0, Math.ceil(records.length / 2)), records.slice(Math.ceil(records.length / 2))].map((halfRecords, colIndex) => (
+                    <div key={colIndex}>
+                      <table className="w-full text-right border-collapse text-[9px] print:text-[10px]">
+                        <thead>
+                          <tr className="bg-slate-100 border-2 border-slate-900">
+                            <th className="px-2 py-1.5 border-2 border-slate-900 font-black text-center">التاريخ</th>
+                            <th className="px-2 py-1.5 border-2 border-slate-900 font-black text-center">الحضور</th>
+                            <th className="px-2 py-1.5 border-2 border-slate-900 font-black text-center">الانصراف</th>
+                            <th className="px-2 py-1.5 border-2 border-slate-900 font-black text-center">التأخير</th>
+                            <th className="px-2 py-1.5 border-2 border-slate-900 font-black text-center">ساعات</th>
+                            <th className="px-2 py-1.5 border-2 border-slate-900 font-black text-center">الحالة</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {halfRecords.map((record: any) => {
+                            return (
+                              <tr key={record.id} className="border border-slate-300">
+                                <td className="px-2 py-1 border border-slate-300 text-center font-bold text-slate-700">{record.date}</td>
+                                <td className="px-2 py-1 border border-slate-300 text-center">
+                                  {record.checkIn ? format(new Date(record.checkIn), 'HH:mm') : '--:--'}
+                                </td>
+                                <td className="px-2 py-1 border border-slate-300 text-center">
+                                  {record.checkOut ? format(new Date(record.checkOut), 'HH:mm') : '--:--'}
+                                </td>
+                                <td className="px-2 py-1 border border-slate-300 text-center text-[8px]">
+                                  {record.delayMinutes || 0}د / {record.earlyDepartureMinutes || 0}د
+                                </td>
+                                <td className="px-2 py-1 border border-slate-300 text-center font-black">{record.workingHours}h</td>
+                                <td className="px-2 py-1 border border-slate-300 text-center">
+                                  <div className="flex flex-col items-center leading-none">
+                                    <span className="font-bold whitespace-nowrap">{record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : record.status === 'absent' ? 'غياب' : 'معلق'}</span>
+                                    {record.notes && <span className="text-[7px] text-rose-600 font-black whitespace-nowrap mt-0.5">{record.notes}</span>}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
 
                 {/* Verification Section */}
                 <div className="mt-auto grid grid-cols-2 gap-20 px-10 pb-8 pt-4">
