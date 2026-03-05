@@ -91,9 +91,10 @@ const ReportRow = memo(({
         <div className="flex flex-col items-center gap-1">
           <span className={`inline-flex items-center px-3 py-1 rounded-full text-[9px] font-black border uppercase ${record.status === 'present' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
             record.status === 'late' ? 'bg-amber-50 text-amber-700 border-amber-100' :
-              'bg-slate-50 text-slate-500 border-slate-100'
+              record.status === 'absent' ? 'bg-rose-50 text-rose-700 border-rose-100' :
+                'bg-slate-50 text-slate-500 border-slate-100'
             }`}>
-            {record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير حضور' : 'سجل معلق'}
+            {record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير حضور' : record.status === 'absent' ? 'غياب' : 'سجل معلق'}
           </span>
           {holiday && (
             <span className="text-[8px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase">
@@ -157,9 +158,11 @@ const ReportCard = memo(({
           </div>
         </div>
         <span className={`px-2.5 py-1 rounded-full text-[8px] font-black border uppercase ${record.status === 'present' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-          record.status === 'late' ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-slate-50 text-slate-400'
+          record.status === 'late' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+            record.status === 'absent' ? 'bg-rose-50 text-rose-700 border-rose-100' :
+              'bg-slate-50 text-slate-400'
           }`}>
-          {record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : 'معلق'}
+          {record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : record.status === 'absent' ? 'غياب' : 'معلق'}
         </span>
       </div>
       {record.notes && (
@@ -322,6 +325,7 @@ const Reports: React.FC = () => {
   const { filteredData, totalFiltered, totalPages, paginatedData, groupedByEmployee } = useMemo(() => {
     // 1. تفتيت المناوبات الطويلة إلى سجلات يومية
     const processedAttendance: any[] = [];
+    const attendanceMap = new Set<string>();
 
     attendance.forEach(record => {
       const emp = employeeMap.get(record.employeeId);
@@ -363,12 +367,61 @@ const Reports: React.FC = () => {
               isSplit: true,
               status: record.checkOut ? 'present' : 'not_logged_out'
             });
+            attendanceMap.add(`${record.employeeId}-${dateStr}`);
           });
           return;
         }
       }
       processedAttendance.push(record);
+      if (record.date) attendanceMap.add(`${record.employeeId}-${record.date}`);
     });
+
+    // 2. توليد سجلات الغياب للموظفين الإداريين (الذين لم يأتوا في أيام الدوام الأساسية)
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const _endDateStr = dateTo < todayStr ? dateTo : todayStr; // تحديد السقف الزمني لعدم احتساب الغياب للأيام القادمة
+
+    if (dateFrom <= todayStr) {
+      // يجب إنشاء كائنين صحيحين من date-fns لكل من البداية والنهاية
+      const startObj = parseISO(dateFrom);
+      const endObj = parseISO(_endDateStr);
+
+      if (startObj <= endObj) {
+        const dateRange = eachDayOfInterval({ start: startObj, end: endObj });
+
+        employees.forEach(emp => {
+          // استثناء الموظفين غير النشطين أو موظفي المناوبات
+          if (!emp.isActive || emp.workType === 'shifts') return;
+
+          const center = centerMap.get(emp.centerId);
+          if (!center) return;
+
+          dateRange.forEach(dateObj => {
+            const dateStr = format(dateObj, 'yyyy-MM-dd');
+
+            // عدم احتساب الغياب قبل تاريخ انضمام الموظف
+            if (emp.joinedDate && dateStr < emp.joinedDate) return;
+
+            const isHoliday = holidays.some(h => h.date === dateStr);
+            const isWeekend = center.workingDays && !center.workingDays.includes(dateObj.getDay());
+
+            // في حال لم تكن إجازة أو عطلة، ولم يُسجل الموظف أي بصمة في هذا اليوم -> يولد سجل غياب
+            if (!isHoliday && !isWeekend && !attendanceMap.has(`${emp.id}-${dateStr}`)) {
+              processedAttendance.push({
+                id: `absent-${emp.id}-${dateStr}`,
+                employeeId: emp.id,
+                centerId: emp.centerId,
+                date: dateStr,
+                status: 'absent',
+                delayMinutes: 0,
+                earlyDepartureMinutes: 0,
+                workingHours: 0,
+                notes: 'غياب غير مبرر'
+              });
+            }
+          });
+        });
+      }
+    }
 
     const filtered = processedAttendance.filter(record => {
       const matchesDate = record.date >= dateFrom && record.date <= dateTo;
@@ -458,10 +511,14 @@ const Reports: React.FC = () => {
           const formatTime = (iso?: string) => iso ? format(new Date(iso), 'HH:mm') : '-';
 
           let note = '';
-          if (record.delayMinutes > 0) note += `تأخير ${record.delayMinutes}د. `;
-          if (record.earlyDepartureMinutes > 0) note += `خروج مبكر ${record.earlyDepartureMinutes}د. `;
-          if (record.status === 'present' && record.delayMinutes === 0) note = 'منضبط';
-          if (record.notes) note = note ? `${note} (${record.notes})` : record.notes;
+          if (record.status === 'absent') {
+            note = 'غياب غير مبرر';
+          } else {
+            if (record.delayMinutes > 0) note += `تأخير ${record.delayMinutes}د. `;
+            if (record.earlyDepartureMinutes > 0) note += `خروج مبكر ${record.earlyDepartureMinutes}د. `;
+            if (record.status === 'present' && record.delayMinutes === 0) note = 'منضبط';
+            if (record.notes) note = note ? `${note} (${record.notes})` : record.notes;
+          }
 
           return [
             emp?.name || 'غير معروف',
@@ -778,7 +835,7 @@ const Reports: React.FC = () => {
                     <td className="px-3 py-1.5 border border-slate-300 text-center font-bold">{record.workingHours}h</td>
                     <td className="px-3 py-1.5 border border-slate-300 text-center">
                       <div className="flex flex-col">
-                        <span className="font-bold">{record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : 'معلق'}</span>
+                        <span className="font-bold">{record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : record.status === 'absent' ? 'غياب' : 'معلق'}</span>
                         {record.notes && <span className="text-[8px] text-rose-600 font-black">{record.notes}</span>}
                       </div>
                     </td>
