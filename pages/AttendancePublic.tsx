@@ -511,7 +511,21 @@ const AttendancePublic: React.FC = () => {
 
               {matchedCenter && selectedEmployeeId && (() => {
                 const todayStr = format(currentTime, 'yyyy-MM-dd');
-                const todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
+                let todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
+
+                // دمج ذكي لموظفي المناوبات: جلب أحدث سجل مفتوح حتى لو كان من يوم سابق
+                const localEmployee = employees.find(e => e.id === selectedEmployeeId);
+                const isShiftWorker = localEmployee?.workType === 'shifts';
+
+                if (isShiftWorker) {
+                  const recentRecord = [...attendance]
+                    .filter(a => a.employeeId === selectedEmployeeId)
+                    .sort((a, b) => new Date(b.checkIn!).getTime() - new Date(a.checkIn!).getTime())[0];
+
+                  if (recentRecord && !recentRecord.checkOut) {
+                    todayRecord = recentRecord;
+                  }
+                }
 
                 return (
                   <div className="animate-in fade-in slide-in-from-top-4 duration-700 delay-400 space-y-4">
