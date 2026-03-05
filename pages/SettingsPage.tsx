@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../store.tsx';
-import { 
-  Settings, Shield, Globe, Clock, Save, 
-  Monitor, CheckCircle, Upload, Database, HardDriveDownload, 
+import {
+  Settings, Shield, Globe, Clock, Save,
+  Monitor, CheckCircle, Upload, Database, HardDriveDownload,
   Zap, Activity, ImageIcon, X, Wifi, WifiOff, AlertCircle, RefreshCw, Server,
   Terminal, Trash2, ClipboardList, ChevronDown, ChevronUp, Search, Info,
   Code2, Cpu, ArrowRightLeft, DatabaseBackup
@@ -18,23 +18,23 @@ interface SyncLog {
 }
 
 const SettingsPage: React.FC = () => {
-  const { 
-    settings, updateSettings, currentUser, updateAdmin, 
-    isRealtimeConnected, dbStatus, refreshData, testConnection
+  const {
+    settings, updateSettings, currentUser, updateAdmin,
+    isRealtimeConnected, dbStatus, refreshData, testConnection, sendRemoteRefresh
   } = useApp();
-  
+
   const logoInputRef = useRef<HTMLInputElement>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
-  
+
   const [sysName, setSysName] = useState(settings.systemName);
   const [logoUrl, setLogoUrl] = useState(settings.logoUrl || '');
   const [lang, setLang] = useState(settings.language);
   const [timeFormat, setTimeFormat] = useState(settings.timeFormat);
-  
+
   const [adminName, setAdminName] = useState(currentUser?.name || '');
   const [adminUsername, setAdminUsername] = useState(currentUser?.username || '');
   const [newPassword, setNewPassword] = useState('');
-  
+
   const [isSavingSystem, setIsSavingSystem] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -62,7 +62,7 @@ const SettingsPage: React.FC = () => {
     setIsSyncing(true);
     setSyncLogs([]);
     addLog('بِدء عملية تشخيص الربط وتحليل المتغيرات...', 'system');
-    
+
     const steps = [
       { msg: 'جاري فحص حالة الاتصال بـ Supabase Cloud...', type: 'command' },
       { msg: 'تحليل متغيرات البيئة (API_KEY, URL)...', type: 'info' },
@@ -92,7 +92,7 @@ const SettingsPage: React.FC = () => {
     e.preventDefault();
     setIsSavingSystem(true);
     addLog(`إرسال تحديث المتغيرات: systemName="${sysName}"`, 'command');
-    
+
     setTimeout(() => {
       updateSettings({ ...settings, systemName: sysName, logoUrl, language: lang, timeFormat });
       setIsSavingSystem(false);
@@ -127,7 +127,7 @@ const SettingsPage: React.FC = () => {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         <div className="xl:col-span-2 space-y-8">
-          
+
           {/* Diagnostic Sync Engine Card */}
           <div className="bg-slate-900 rounded-[3rem] text-white shadow-2xl relative overflow-hidden border border-slate-800">
             <div className="p-8 border-b border-white/5 flex items-center justify-between bg-slate-950/50">
@@ -146,14 +146,28 @@ const SettingsPage: React.FC = () => {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button 
+                <button
                   onClick={() => setSyncLogs([])}
                   className="p-3 text-slate-500 hover:text-white transition-colors"
                   title="مسح السجل"
                 >
                   <Trash2 className="w-5 h-5" />
                 </button>
-                <button 
+                <button
+                  onClick={async () => {
+                    if (confirm('هل أنت متأكد من إرسال أمر تحديث إجباري لكافة المتصفحات المفتوحة حالياً؟')) {
+                      addLog('إرسال أمر التحديث الجذري (Remote Refresh)...', 'command');
+                      await sendRemoteRefresh();
+                      addLog('تم بث الأمر بنجاح عبر بروتوكول Broadcast.', 'success');
+                      triggerSuccess('تم إرسال أمر التحديث');
+                    }
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 text-white p-3 rounded-2xl transition-all border border-white/10"
+                  title="تحديث إجباري لجميع الأجهزة"
+                >
+                  <ArrowRightLeft className="w-5 h-5" />
+                </button>
+                <button
                   onClick={runDiagnosticAnalysis}
                   disabled={isSyncing}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center gap-2 shadow-xl shadow-indigo-600/20 disabled:opacity-50"
@@ -166,7 +180,7 @@ const SettingsPage: React.FC = () => {
 
             {/* Terminal Interface */}
             <div className={`transition-all duration-500 ${showConsole ? 'h-[400px]' : 'h-0'} overflow-hidden relative`}>
-              <div 
+              <div
                 ref={consoleRef}
                 className="h-full overflow-y-auto p-8 font-mono text-[11px] space-y-3 custom-scrollbar bg-black/40"
               >
@@ -180,11 +194,11 @@ const SettingsPage: React.FC = () => {
                   <div key={log.id} className="flex gap-4 animate-in slide-in-from-right-4 duration-300">
                     <span className="text-slate-600 shrink-0 font-bold opacity-50">[{log.time}]</span>
                     <span className={`
-                      ${log.type === 'success' ? 'text-emerald-400' : 
-                        log.type === 'error' ? 'text-rose-400' : 
-                        log.type === 'command' ? 'text-indigo-400 font-black' : 
-                        log.type === 'system' ? 'text-amber-400 font-black' :
-                        'text-slate-300'}
+                      ${log.type === 'success' ? 'text-emerald-400' :
+                        log.type === 'error' ? 'text-rose-400' :
+                          log.type === 'command' ? 'text-indigo-400 font-black' :
+                            log.type === 'system' ? 'text-amber-400 font-black' :
+                              'text-slate-300'}
                     `}>
                       {log.type === 'command' ? '> ' : log.type === 'system' ? ':: ' : ''}
                       {log.message}
@@ -192,15 +206,15 @@ const SettingsPage: React.FC = () => {
                   </div>
                 ))}
               </div>
-              
+
               <div className="absolute top-4 left-4 flex gap-1.5 opacity-20 group-hover:opacity-100 transition-opacity">
-                 <div className="w-2.5 h-2.5 rounded-full bg-rose-500"></div>
-                 <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
-                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+                <div className="w-2.5 h-2.5 rounded-full bg-rose-500"></div>
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
               </div>
             </div>
 
-            <button 
+            <button
               onClick={() => setShowConsole(!showConsole)}
               className="w-full py-4 border-t border-white/5 bg-white/5 flex items-center justify-center text-slate-500 hover:text-white transition-colors"
             >
@@ -215,14 +229,14 @@ const SettingsPage: React.FC = () => {
           <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 relative overflow-hidden">
             <div className="flex items-center gap-4 mb-10">
               <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-[1.25rem] flex items-center justify-center">
-                 <Monitor className="w-6 h-6" />
+                <Monitor className="w-6 h-6" />
               </div>
               <div>
                 <h3 className="text-xl font-black text-slate-900 tracking-tight">هوية وتخصيص النظام</h3>
                 <p className="text-xs text-slate-400 font-bold">تغيير المسمى العام وتنسيقات الوقت واللغة والشعار</p>
               </div>
             </div>
-            
+
             <form onSubmit={handleSaveSystem} className="space-y-8">
               <div className="p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100 space-y-4">
                 <label className="block text-[10px] font-black text-slate-400 uppercase mb-2 mr-2 tracking-widest">شعار المنظمة المعتمد</label>
@@ -273,7 +287,7 @@ const SettingsPage: React.FC = () => {
                   </select>
                 </div>
                 <div className="flex items-end">
-                   <button type="submit" disabled={isSavingSystem} className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl hover:bg-black transition-all flex items-center justify-center gap-2 text-xs disabled:opacity-50 shadow-xl shadow-slate-200">
+                  <button type="submit" disabled={isSavingSystem} className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl hover:bg-black transition-all flex items-center justify-center gap-2 text-xs disabled:opacity-50 shadow-xl shadow-slate-200">
                     {isSavingSystem ? 'جاري الحفظ...' : <><Save className="w-4 h-4" /> حفظ التغييرات</>}
                   </button>
                 </div>
@@ -285,36 +299,36 @@ const SettingsPage: React.FC = () => {
         <div className="space-y-8">
           {/* Diagnostic Stats Widget */}
           <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
-             <div className="flex items-center justify-between">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">تقارير التشخيص</h4>
-                <Activity className="w-4 h-4 text-emerald-500" />
-             </div>
-             
-             <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
-                   <div className="flex items-center gap-3">
-                      <Server className="w-4 h-4 text-indigo-600" />
-                      <span className="text-xs font-bold text-slate-600">قاعدة البيانات</span>
-                   </div>
-                   <span className="text-[10px] font-black text-emerald-600 uppercase">Operational</span>
+            <div className="flex items-center justify-between">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">تقارير التشخيص</h4>
+              <Activity className="w-4 h-4 text-emerald-500" />
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
+                <div className="flex items-center gap-3">
+                  <Server className="w-4 h-4 text-indigo-600" />
+                  <span className="text-xs font-bold text-slate-600">قاعدة البيانات</span>
                 </div>
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
-                   <div className="flex items-center gap-3">
-                      <ArrowRightLeft className="w-4 h-4 text-indigo-600" />
-                      <span className="text-xs font-bold text-slate-600">المزامنة اللحظية</span>
-                   </div>
-                   <span className="text-[10px] font-black text-emerald-600 uppercase">Active</span>
+                <span className="text-[10px] font-black text-emerald-600 uppercase">Operational</span>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
+                <div className="flex items-center gap-3">
+                  <ArrowRightLeft className="w-4 h-4 text-indigo-600" />
+                  <span className="text-xs font-bold text-slate-600">المزامنة اللحظية</span>
                 </div>
-                <div className={`p-5 rounded-[2rem] border flex flex-col gap-3 ${isRealtimeConnected ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
-                   <div className="flex items-center gap-3">
-                      {isRealtimeConnected ? <Wifi className="w-5 h-5 text-emerald-600" /> : <WifiOff className="w-5 h-5 text-rose-600" />}
-                      <p className="text-[9px] font-black uppercase tracking-tighter text-slate-900">حالة الربط اللحظي</p>
-                   </div>
-                   <p className={`text-[11px] font-bold ${isRealtimeConnected ? 'text-emerald-700' : 'text-rose-700'}`}>
-                    {isRealtimeConnected ? 'مستقر ومتصل بقناة البيانات' : 'تنبيه: انقطاع في قناة البث المباشر'}
-                   </p>
+                <span className="text-[10px] font-black text-emerald-600 uppercase">Active</span>
+              </div>
+              <div className={`p-5 rounded-[2rem] border flex flex-col gap-3 ${isRealtimeConnected ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+                <div className="flex items-center gap-3">
+                  {isRealtimeConnected ? <Wifi className="w-5 h-5 text-emerald-600" /> : <WifiOff className="w-5 h-5 text-rose-600" />}
+                  <p className="text-[9px] font-black uppercase tracking-tighter text-slate-900">حالة الربط اللحظي</p>
                 </div>
-             </div>
+                <p className={`text-[11px] font-bold ${isRealtimeConnected ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {isRealtimeConnected ? 'مستقر ومتصل بقناة البيانات' : 'تنبيه: انقطاع في قناة البث المباشر'}
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="bg-slate-900 p-10 rounded-[3.5rem] text-white shadow-2xl relative overflow-hidden group border border-white/5">
