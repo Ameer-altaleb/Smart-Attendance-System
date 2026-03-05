@@ -141,7 +141,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
             // Update with new data from server
             data.forEach((newItem: any) => {
-              existingMap.set(newItem.id, newItem);
+              existingMap.set(newItem.id, { ...newItem, syncStatus: 'synced' });
             });
 
             return Array.from(existingMap.values());
@@ -167,7 +167,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           fetchTable('admins', setAdmins, INITIAL_ADMINS),
           fetchTable('attendance', setAttendance, [], 'merge'),
           fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
-          fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS),
+          fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS, 'merge'),
           fetchTable('templates', setTemplates, INITIAL_TEMPLATES),
           fetchTable('settings', setSettings, INITIAL_SETTINGS)
         ]);
@@ -328,7 +328,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               if (eventType === 'INSERT') {
                 setNotifications(prev => {
                   if (prev.some(n => n.id === (newRecord as Notification).id)) return prev;
-                  return [...prev, newRecord as Notification];
+                  return [...prev, { ...newRecord as Notification, syncStatus: 'synced' }];
                 });
               } else if (eventType === 'DELETE') {
                 setNotifications(prev => prev.filter(n => n.id !== (oldRecord as any).id));
@@ -475,8 +475,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Notifications CRUD
   const addNotification = useCallback(async (n: Notification) => {
-    setNotifications(prev => [...prev, n]);
-    executeDbOperation('notifications', () => supabase!.from('notifications').insert(n));
+    const record = { ...n, syncStatus: 'pending' as const };
+    setNotifications(prev => [...prev, record]);
+    executeDbOperation('notifications',
+      () => supabase!.from('notifications').insert(n),
+      (success) => {
+        if (success) {
+          setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, syncStatus: 'synced' } : item));
+        } else {
+          setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, syncStatus: 'failed' } : item));
+        }
+      }
+    );
   }, [executeDbOperation]);
 
   const deleteNotification = useCallback(async (id: string) => {

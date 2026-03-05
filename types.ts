@@ -94,6 +94,7 @@ export interface Notification {
   targetId?: string;
   senderName: string;
   sentAt: string;
+  syncStatus?: 'synced' | 'pending' | 'failed';
 }
 
 export interface MessageTemplate {
