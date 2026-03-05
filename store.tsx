@@ -455,8 +455,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addAttendance = useCallback(async (r: AttendanceRecord) => {
     const record = { ...r, syncStatus: 'pending' as const };
     setAttendance(prev => [...prev, record]);
+
+    // إزالة الحقل المحلي قبل الإرسال لقاعدة البيانات
+    const { syncStatus, ...dbRecord } = r;
+
     executeDbOperation('attendance',
-      () => supabase!.from('attendance').insert(r),
+      () => supabase!.from('attendance').insert(dbRecord),
       (success) => {
         if (success) {
           setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
@@ -470,8 +474,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updateAttendance = useCallback(async (r: AttendanceRecord) => {
     const record = { ...r, syncStatus: 'pending' as const };
     setAttendance(prev => prev.map(item => item.id === r.id ? record : item));
+
+    // إزالة الحقل المحلي قبل الإرسال لقاعدة البيانات
+    const { syncStatus, ...dbRecord } = r;
+
     executeDbOperation('attendance',
-      () => supabase!.from('attendance').update(r).eq('id', r.id),
+      () => supabase!.from('attendance').update(dbRecord).eq('id', r.id),
       (success) => {
         if (success) {
           setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
@@ -486,8 +494,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addNotification = useCallback(async (n: Notification) => {
     const record = { ...n, syncStatus: 'pending' as const };
     setNotifications(prev => [...prev, record]);
+
+    // إزالة الحقل المحلي قبل الإرسال لقاعدة البيانات
+    const { syncStatus, ...dbRecord } = n;
+
     executeDbOperation('notifications',
-      () => supabase!.from('notifications').insert(n),
+      () => supabase!.from('notifications').insert(dbRecord),
       (success) => {
         if (success) {
           setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, syncStatus: 'synced' } : item));
@@ -547,8 +559,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (pending.length === 0) return;
 
     for (const record of pending) {
+      // إزالة الحقل المحلي قبل المعالجة
+      const { syncStatus, ...dbRecord } = record;
+
       executeDbOperation('attendance',
-        () => supabase!.from('attendance').upsert(record),
+        () => supabase!.from('attendance').upsert(dbRecord),
         (success) => {
           if (success) {
             setAttendance(prev => prev.map(item => item.id === record.id ? { ...item, syncStatus: 'synced' } : item));
