@@ -327,8 +327,7 @@ const AttendancePublic: React.FC = () => {
           };
           await addAttendance(record);
 
-          // Re-fetch only if necessary and after a small delay to allow DB consistency
-          setTimeout(() => refreshData('attendance'), 1000);
+          // Realtime handles the update
 
           const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
           setMessage({ text: template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح', type: 'success' });
@@ -356,8 +355,7 @@ const AttendancePublic: React.FC = () => {
             longitude: userLocation?.lon
           });
 
-          // Re-fetch only if necessary and after a small delay
-          setTimeout(() => refreshData('attendance'), 1000);
+          // Realtime handles the update
 
           const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
           setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
