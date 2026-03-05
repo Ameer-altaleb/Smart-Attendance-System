@@ -68,6 +68,17 @@ const MainApp: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
+  // Auto-Reload on internet restoration
+  useEffect(() => {
+    const handleOnline = () => {
+      // Small delay to ensure network stack is fully ready
+      setTimeout(() => window.location.reload(), 1000);
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
