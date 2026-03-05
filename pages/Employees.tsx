@@ -67,12 +67,9 @@ const EmployeeRow = memo(({
       </span>
     </td>
     <td className="px-8 py-4 text-center">
-      <div className="flex flex-col items-center">
-        <span className="text-slate-700 font-black text-xs">{emp.workingHours}h</span>
-        <span className="text-[8px] font-black text-slate-400 uppercase mt-1">
-          {emp.workType === 'shifts' ? 'نظام مناوبات' : 'إداري'}
-        </span>
-      </div>
+      <span className={`inline-flex items-center px-3 py-1 rounded-full text-[9px] font-black border uppercase ${emp.workType === 'shifts' ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-indigo-50 text-indigo-700 border-indigo-100'}`}>
+        {emp.workType === 'shifts' ? 'مناوبات' : 'إداري'}
+      </span>
     </td>
     <td className="px-8 py-4">
       <div className="flex items-center justify-end gap-2">
@@ -295,7 +292,7 @@ const Employees: React.FC = () => {
 
   const handleOpenEdit = useCallback((emp: Employee) => {
     setEditingEmployee(emp); setName(emp.name); setCode(emp.code || '');
-    setCenterId(emp.centerId); setProjectId(emp.projectId || ''); setWorkingHours(emp.workingHours); setIsActive(emp.isActive);
+    setCenterId(emp.centerId); setProjectId(emp.projectId || ''); setIsActive(emp.isActive);
     setWorkType(emp.workType || 'administrative');
     setModalOpen(true);
   }, []);
@@ -320,11 +317,11 @@ const Employees: React.FC = () => {
     e.preventDefault();
     if (!name || !centerId || !code) return;
     if (editingEmployee) {
-      updateEmployee({ ...editingEmployee, name, code, centerId, projectId, workingHours, isActive, workType });
+      updateEmployee({ ...editingEmployee, name, code, centerId, projectId, workingHours: editingEmployee.workingHours, isActive, workType });
     } else {
       addEmployee({
         id: crypto.randomUUID(),
-        code, name, centerId, projectId, workingHours,
+        code, name, centerId, projectId, workingHours: 8, // القيمة الافتراضية المبدئية
         joinedDate: new Date().toISOString().split('T')[0],
         isActive,
         workType
@@ -333,7 +330,7 @@ const Employees: React.FC = () => {
     setModalOpen(false);
     // Reset selection after submit
     setProjectId('');
-  }, [name, code, centerId, projectId, workingHours, isActive, workType, editingEmployee, addEmployee, updateEmployee]);
+  }, [name, code, centerId, projectId, isActive, workType, editingEmployee, addEmployee, updateEmployee]);
 
   // Filtered and grouped employees with pagination
   const { groupedEmployees, totalFiltered, totalPages } = useMemo(() => {
@@ -445,7 +442,7 @@ const Employees: React.FC = () => {
                       <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">الموظف</th>
                       <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">حالة الأمان</th>
                       <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">الحالة</th>
-                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">ساعات العمل</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">نوع العقد</th>
                       <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">الإجراءات</th>
                     </tr>
                   </thead>
