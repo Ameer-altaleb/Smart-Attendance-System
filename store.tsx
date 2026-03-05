@@ -52,6 +52,7 @@ interface AppContextType {
   refreshData: (tableName?: string) => Promise<void>;
   testConnection: () => Promise<void>;
   retrySync: () => Promise<void>;
+  sendRemoteRefresh: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -220,6 +221,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const channel = supabase
       .channel('schema-db-changes')
+      .on(
+        'broadcast',
+        { event: 'force-refresh' },
+        () => {
+          console.log('Remote refresh command received');
+          window.location.reload();
+        }
+      )
       .on(
         'postgres_changes',
         {
@@ -576,6 +585,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     executeDbOperation('projects', () => supabase!.from('projects').update({ deleted_at: new Date().toISOString() }).eq('id', id));
   }, [executeDbOperation]);
 
+  const sendRemoteRefresh = useCallback(async () => {
+    if (!supabase) return;
+    const channel = supabase.channel('system-commands');
+    await channel.subscribe();
+    channel.send({
+      type: 'broadcast',
+      event: 'force-refresh',
+      payload: {
+        timestamp: new Date().toISOString(),
+        sender: currentUser?.name || 'System'
+      }
+    });
+  }, [currentUser]);
+
   // Memoized context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
@@ -584,14 +607,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     deleteEmployee, addAttendance, updateAttendance, addNotification, deleteNotification,
     updateTemplate, updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday,
     deleteHoliday, addProject, updateProject, deleteProject, refreshData, testConnection,
-    retrySync
+    retrySync, sendRemoteRefresh
   }), [
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
     currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations, refreshData,
     addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee, deleteEmployee,
     addAttendance, updateAttendance, addNotification, deleteNotification, updateTemplate,
     updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday, deleteHoliday,
-    addProject, updateProject, deleteProject, executeDbOperation
+    addProject, updateProject, deleteProject, executeDbOperation, sendRemoteRefresh
   ]);
 
   return (
