@@ -589,31 +589,6 @@ const Reports: React.FC = () => {
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in duration-700">
-      {/* Print Header (Visible only during printing) - Single Log Version */}
-      {reportType === 'log' && (
-        <div className="hidden print:flex flex-col items-center justify-center space-y-4 mb-8 text-center" dir="rtl">
-          <div className="flex items-center justify-between w-full border-b-2 border-slate-900 pb-4">
-            <div className="text-right">
-              <h2 className="text-xl font-black">{settings.systemName || 'خبراء الإغاثة'}</h2>
-              <p className="text-sm font-bold text-slate-500">إدارة شؤون الموظفين - سجل الحضور</p>
-            </div>
-            {settings.logoUrl && (
-              <img src={settings.logoUrl} alt="Logo" className="h-16 w-auto object-contain" />
-            )}
-            <div className="text-left text-[10px] font-black space-y-1">
-              <p>تاريخ استخراج التقرير: {format(new Date(), 'yyyy/MM/dd HH:mm')}</p>
-              <p>مجال التقرير: {dateFrom} إلى {dateTo}</p>
-            </div>
-          </div>
-          <h1 className="text-2xl font-black mt-4 underline decoration-indigo-500 underline-offset-8">سجل الحضور والانصراف الميداني</h1>
-          <div className="grid grid-cols-3 gap-8 w-full bg-white p-4 rounded-xl border-2 border-slate-900 text-sm font-black text-slate-900">
-            <div>المركز: {filterCenter === '' ? 'جميع المراكز' : centers.find(c => c.id === filterCenter)?.name}</div>
-            <div>الموظف: {filterEmployee === '' ? 'جميع الموظفين' : employees.find(e => e.id === filterEmployee)?.name}</div>
-            <div>إجمالي السجلات: {totalFiltered} سجل</div>
-          </div>
-        </div>
-      )}
-
       {/* Header & Main Actions */}
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 print:hidden">
         <div className="space-y-1">
@@ -798,64 +773,96 @@ const Reports: React.FC = () => {
         />
       </div>
 
-      {/* Full Printing - LOG Mode */}
+      {/* Full Printing - LOG Mode (Per Employee Page) */}
       {reportType === 'log' && (
         <div className="hidden print:block w-full" dir="rtl">
-          <table className="w-full text-right border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-100 border-2 border-slate-900">
-                <th className="px-3 py-2 border-2 border-slate-900 font-black">الموظف</th>
-                <th className="px-3 py-2 border-2 border-slate-900 font-black">المركز</th>
-                <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">التاريخ</th>
-                <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الحضور</th>
-                <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الانصراف</th>
-                <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">تأخير/مبكر</th>
-                <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">ساعات</th>
-                <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الحالة</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredData.map((record) => {
-                const emp = employeeMap.get(record.employeeId);
-                const center = centerMap.get(record.centerId);
-                return (
-                  <tr key={record.id} className="border border-slate-300">
-                    <td className="px-3 py-1.5 border border-slate-300 font-bold">{emp?.name}</td>
-                    <td className="px-3 py-1.5 border border-slate-300">{center?.name}</td>
-                    <td className="px-3 py-1.5 border border-slate-300 text-center">{record.date}</td>
-                    <td className="px-3 py-1.5 border border-slate-300 text-center">
-                      {record.checkIn ? format(new Date(record.checkIn), 'HH:mm') : '--:--'}
-                    </td>
-                    <td className="px-3 py-1.5 border border-slate-300 text-center">
-                      {record.checkOut ? format(new Date(record.checkOut), 'HH:mm') : '--:--'}
-                    </td>
-                    <td className="px-3 py-1.5 border border-slate-300 text-center">
-                      {record.delayMinutes || 0}د / {record.earlyDepartureMinutes || 0}د
-                    </td>
-                    <td className="px-3 py-1.5 border border-slate-300 text-center font-bold">{record.workingHours}h</td>
-                    <td className="px-3 py-1.5 border border-slate-300 text-center">
-                      <div className="flex flex-col">
-                        <span className="font-bold">{record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : record.status === 'absent' ? 'غياب' : 'معلق'}</span>
-                        {record.notes && <span className="text-[8px] text-rose-600 font-black">{record.notes}</span>}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {Array.from(groupedByEmployee.entries()).map(([employeeId, records], index) => {
+            const emp = employeeMap.get(employeeId);
+            const employeeCenter = centerMap.get(emp?.centerId || '');
+            const totalHours = records.reduce((acc: number, curr: any) => acc + (curr.workingHours || 0), 0);
 
-          {/* Verification Section */}
-          <div className="mt-12 grid grid-cols-2 gap-20 px-10">
-            <div className="flex flex-col items-center space-y-12">
-              <p className="font-black text-sm">توقيع مسؤول الموارد البشرية</p>
-              <div className="w-48 border-b-2 border-dotted border-slate-900"></div>
-            </div>
-            <div className="flex flex-col items-center space-y-12">
-              <p className="font-black text-sm">ختم وتوقيع إدارة المركز</p>
-              <div className="w-48 border-b-2 border-dotted border-slate-900"></div>
-            </div>
-          </div>
+            return (
+              <div key={employeeId} className="page-break-container !p-0 !border-0 flex flex-col pt-8">
+                {/* Print Header for each employee */}
+                <div className="flex flex-col items-center justify-center space-y-4 mb-6 text-center">
+                  <div className="flex items-center justify-between w-full border-b-2 border-slate-900 pb-4">
+                    <div className="text-right">
+                      <h2 className="text-xl font-black">{settings.systemName || 'خبراء الإغاثة'}</h2>
+                      <p className="text-sm font-bold text-slate-500">إدارة شؤون الموظفين - سجل الحضور المعياري</p>
+                    </div>
+                    {settings.logoUrl && (
+                      <img src={settings.logoUrl} alt="Logo" className="h-16 w-auto object-contain" />
+                    )}
+                    <div className="text-left text-[10px] font-black space-y-1">
+                      <p>تاريخ الاستخراج: {format(new Date(), 'yyyy/MM/dd HH:mm')}</p>
+                      <p>مجال التقرير: {dateFrom} إلى {dateTo}</p>
+                    </div>
+                  </div>
+                  <h1 className="text-xl font-black mt-2 underline decoration-indigo-500 underline-offset-8">سجل الحضور والانصراف الميداني</h1>
+                  <div className="grid grid-cols-4 gap-4 w-full bg-white p-3 rounded-xl border-2 border-slate-900 text-xs font-black text-slate-900 text-center">
+                    <div>المركز: {employeeCenter?.name || '---'}</div>
+                    <div>الموظف: {emp?.name || '---'}</div>
+                    <div>عدد السجلات: {records.length} سجل</div>
+                    <div className="text-indigo-700">مجموع الساعات: {totalHours.toFixed(1)} ساعة</div>
+                  </div>
+                </div>
+
+                <table className="w-full text-right border-collapse text-xs mb-8">
+                  <thead>
+                    <tr className="bg-slate-100 border-2 border-slate-900">
+                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">التاريخ</th>
+                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الحضور</th>
+                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الانصراف</th>
+                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">تأخير/مبكر</th>
+                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">ساعات</th>
+                      <th className="px-3 py-2 border-2 border-slate-900 font-black text-center">الحالة</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map((record: any) => {
+                      return (
+                        <tr key={record.id} className="border border-slate-300">
+                          <td className="px-3 py-1.5 border border-slate-300 text-center font-bold text-slate-700">{record.date}</td>
+                          <td className="px-3 py-1.5 border border-slate-300 text-center">
+                            {record.checkIn ? format(new Date(record.checkIn), 'HH:mm') : '--:--'}
+                          </td>
+                          <td className="px-3 py-1.5 border border-slate-300 text-center">
+                            {record.checkOut ? format(new Date(record.checkOut), 'HH:mm') : '--:--'}
+                          </td>
+                          <td className="px-3 py-1.5 border border-slate-300 text-center">
+                            {record.delayMinutes || 0}د / {record.earlyDepartureMinutes || 0}د
+                          </td>
+                          <td className="px-3 py-1.5 border border-slate-300 text-center font-black">{record.workingHours}h</td>
+                          <td className="px-3 py-1.5 border border-slate-300 text-center">
+                            <div className="flex flex-col items-center">
+                              <span className="font-bold">{record.status === 'present' ? 'منضبط' : record.status === 'late' ? 'تأخير' : record.status === 'absent' ? 'غياب' : 'معلق'}</span>
+                              {record.notes && <span className="text-[8px] text-rose-600 font-black">{record.notes}</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Verification Section */}
+                <div className="mt-auto grid grid-cols-2 gap-20 px-10 pb-8 pt-4">
+                  <div className="flex flex-col items-center space-y-12">
+                    <p className="font-black text-sm">توقيع الموظف (إقرار)</p>
+                    <div className="w-48 border-b-2 border-dotted border-slate-900"></div>
+                  </div>
+                  <div className="flex flex-col items-center space-y-12">
+                    <p className="font-black text-sm">ختم وتوقيع إدارة المركز</p>
+                    <div className="w-48 border-b-2 border-dotted border-slate-900"></div>
+                  </div>
+                </div>
+
+                {index < Array.from(groupedByEmployee.entries()).length - 1 && (
+                  <div style={{ pageBreakAfter: 'always' }}></div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
