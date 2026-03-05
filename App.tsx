@@ -57,6 +57,17 @@ const MainApp: React.FC = () => {
     }
   }, [settings.systemName, settings.logoUrl]);
 
+  // Automatic Refresh Logic (Every 12 Hours)
+  useEffect(() => {
+    const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+    const timer = setTimeout(() => {
+      // Reload the page to catch any new updates
+      window.location.reload();
+    }, TWELVE_HOURS);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');

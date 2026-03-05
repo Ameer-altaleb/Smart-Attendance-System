@@ -179,7 +179,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           'settings': () => fetchTable('settings', setSettings, INITIAL_SETTINGS),
           'admins': () => fetchTable('admins', setAdmins, INITIAL_ADMINS),
           'holidays': () => fetchTable('holidays', setHolidays, INITIAL_HOLIDAYS),
-          'notifications': () => fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS),
+          'notifications': () => fetchTable('notifications', setNotifications, INITIAL_NOTIFICATIONS, 'merge'),
           'templates': () => fetchTable('templates', setTemplates, INITIAL_TEMPLATES),
         };
         if (fetchTableMap[tableName]) await fetchTableMap[tableName]();
@@ -204,7 +204,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await refreshData();
         setIsRealtimeConnected(true);
       } else {
-        const tables = ['centers', 'employees', 'admins', 'attendance', 'holidays', 'notifications', 'templates', 'settings'];
+        const tables = ['centers', 'employees', 'admins', 'attendance', 'holidays', 'notifications', 'templates', 'settings', 'projects'];
         const initialStatus: Record<string, 'online'> = {};
         tables.forEach(t => initialStatus[t] = 'online');
         setDbStatus(initialStatus);
@@ -212,7 +212,157 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     init();
-  }, []);
+  }, [refreshData]);
+
+  // Real-time synchronization
+  useEffect(() => {
+    if (!checkSupabaseConnection() || !supabase) return;
+
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+        },
+        (payload) => {
+          const { table, eventType, new: newRecord, old: oldRecord } = payload;
+
+          if (!isMounted.current) return;
+
+          switch (table) {
+            case 'attendance':
+              if (eventType === 'INSERT') {
+                setAttendance(prev => {
+                  if (prev.some(r => r.id === (newRecord as AttendanceRecord).id)) return prev;
+                  return [...prev, { ...newRecord as AttendanceRecord, syncStatus: 'synced' }];
+                });
+              } else if (eventType === 'UPDATE') {
+                setAttendance(prev => prev.map(r => r.id === (newRecord as AttendanceRecord).id ? { ...newRecord as AttendanceRecord, syncStatus: 'synced' } : r));
+              } else if (eventType === 'DELETE') {
+                setAttendance(prev => prev.filter(r => r.id === (oldRecord as any).id));
+              }
+              break;
+
+            case 'employees':
+              if (eventType === 'INSERT') {
+                setEmployees(prev => {
+                  if (prev.some(e => e.id === (newRecord as Employee).id)) return prev;
+                  return [...prev, newRecord as Employee];
+                });
+              } else if (eventType === 'UPDATE') {
+                const updated = newRecord as Employee;
+                if (updated.deleted_at) {
+                  setEmployees(prev => prev.filter(e => e.id !== updated.id));
+                } else {
+                  setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e));
+                }
+              } else if (eventType === 'DELETE') {
+                setEmployees(prev => prev.filter(e => e.id !== (oldRecord as any).id));
+              }
+              break;
+
+            case 'projects':
+              if (eventType === 'INSERT') {
+                setProjects(prev => {
+                  if (prev.some(p => p.id === (newRecord as Project).id)) return prev;
+                  return [...prev, newRecord as Project];
+                });
+              } else if (eventType === 'UPDATE') {
+                const updated = newRecord as Project;
+                if (updated.deleted_at) {
+                  setProjects(prev => prev.filter(p => p.id !== updated.id));
+                } else {
+                  setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+                }
+              } else if (eventType === 'DELETE') {
+                setProjects(prev => prev.filter(p => p.id !== (oldRecord as any).id));
+              }
+              break;
+
+            case 'centers':
+              if (eventType === 'INSERT') {
+                setCenters(prev => {
+                  if (prev.some(c => c.id === (newRecord as Center).id)) return prev;
+                  return [...prev, newRecord as Center];
+                });
+              } else if (eventType === 'UPDATE') {
+                setCenters(prev => prev.map(c => c.id === (newRecord as Center).id ? (newRecord as Center) : c));
+              } else if (eventType === 'DELETE') {
+                setCenters(prev => prev.filter(c => c.id !== (oldRecord as any).id));
+              }
+              break;
+
+            case 'admins':
+              if (eventType === 'INSERT') {
+                setAdmins(prev => {
+                  if (prev.some(a => a.id === (newRecord as Admin).id)) return prev;
+                  return [...prev, newRecord as Admin];
+                });
+              } else if (eventType === 'UPDATE') {
+                setAdmins(prev => prev.map(a => a.id === (newRecord as Admin).id ? (newRecord as Admin) : a));
+              } else if (eventType === 'DELETE') {
+                setAdmins(prev => prev.filter(a => a.id !== (oldRecord as any).id));
+              }
+              break;
+
+            case 'holidays':
+              if (eventType === 'INSERT') {
+                setHolidays(prev => {
+                  if (prev.some(h => h.id === (newRecord as Holiday).id)) return prev;
+                  return [...prev, newRecord as Holiday];
+                });
+              } else if (eventType === 'DELETE') {
+                setHolidays(prev => prev.filter(h => h.id !== (oldRecord as any).id));
+              }
+              break;
+
+            case 'settings':
+              if (eventType === 'UPDATE' || eventType === 'INSERT') {
+                setSettings(newRecord as SystemSettings);
+              }
+              break;
+
+            case 'notifications':
+              if (eventType === 'INSERT') {
+                setNotifications(prev => {
+                  if (prev.some(n => n.id === (newRecord as Notification).id)) return prev;
+                  return [...prev, newRecord as Notification];
+                });
+              } else if (eventType === 'DELETE') {
+                setNotifications(prev => prev.filter(n => n.id !== (oldRecord as any).id));
+              }
+              break;
+
+            case 'templates':
+              if (eventType === 'UPDATE' || eventType === 'INSERT') {
+                setTemplates(prev => {
+                  const updated = newRecord as MessageTemplate;
+                  if (prev.some(t => t.id === updated.id)) {
+                    return prev.map(t => t.id === updated.id ? updated : t);
+                  }
+                  return [...prev, updated];
+                });
+              }
+              break;
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('Realtime subscription established successfully');
+          setIsRealtimeConnected(true);
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          console.log('Realtime subscription lost, status:', status);
+          setIsRealtimeConnected(false);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase]);
 
   // Track pending operations
   const updatePendingOps = useCallback((tableName: string, delta: number) => {
