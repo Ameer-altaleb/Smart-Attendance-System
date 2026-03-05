@@ -4,7 +4,7 @@ import { useApp } from '../store';
 import {
   Send, Bell, User, Building2, Users, Search, Filter, X,
   CheckCircle, Clock, LayoutGrid, Trash2, Info, Loader2,
-  AlertCircle, MessageSquare, ArrowLeftRight, Check, History
+  AlertCircle, MessageSquare, ArrowLeftRight, Check, History, RefreshCw
 } from 'lucide-react';
 import { Notification } from '../types';
 import { format } from 'date-fns';
@@ -48,7 +48,7 @@ const NotificationsPage: React.FC = () => {
 
     try {
       const newNotification: Notification = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: crypto.randomUUID(),
         title,
         message,
         targetType,
@@ -191,9 +191,19 @@ const NotificationsPage: React.FC = () => {
                       </div>
 
                       <div className="flex items-center gap-4 pt-1">
-                        <div className="flex items-center gap-1.5 text-[9px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-100">
-                          <CheckCircle className="w-3.5 h-3.5" /> الإشعار فعال حالياً
-                        </div>
+                        {notif.syncStatus === 'pending' ? (
+                          <div className="flex items-center gap-1.5 text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 italic animate-pulse">
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> جاري الإرسال...
+                          </div>
+                        ) : notif.syncStatus === 'failed' ? (
+                          <div className="flex items-center gap-1.5 text-[9px] font-black text-rose-600 uppercase tracking-widest bg-rose-50 px-3 py-1 rounded-lg border border-rose-100">
+                            <AlertCircle className="w-3.5 h-3.5" /> فشل الحفظ في السحابة
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-[9px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-100">
+                            <CheckCircle className="w-3.5 h-3.5" /> الإشعار فعال ومؤرشف
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
