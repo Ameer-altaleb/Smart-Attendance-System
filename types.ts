@@ -112,4 +112,5 @@ export interface SystemSettings {
   timeFormat: string;
   metadata?: any;
   schema_version?: string;
+  appVersion?: string;
 }

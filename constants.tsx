@@ -26,4 +26,5 @@ export const INITIAL_SETTINGS: SystemSettings = {
   language: 'Arabic',
   dateFormat: 'YYYY-MM-DD',
   timeFormat: 'HH:mm',
+  appVersion: '1.0.0',
 };
