@@ -10,6 +10,7 @@ import {
 import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance } from '../utils/attendanceLogic.ts';
 import { AttendanceRecord, Employee, Notification, Center } from '../types.ts';
 import { supabase } from '../lib/supabase.ts';
+import { APP_VERSION } from '../constants.tsx';
 
 const getDeviceId = () => {
   let id = localStorage.getItem('attendance_device_id');
@@ -656,14 +657,12 @@ const AttendancePublic: React.FC = () => {
               {matchedCenter ? `IP: ${userIP}` : 'Dynamic Network'}
             </span>
           </div>
-          {settings.appVersion && (
-            <div className="flex items-center gap-2">
-              <div className="h-6 w-[1px] bg-slate-200 hidden md:block"></div>
-              <span className="text-[9px] font-black text-indigo-600/60 uppercase tracking-widest">
-                Version {settings.appVersion}
-              </span>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-[1px] bg-slate-200 hidden md:block"></div>
+            <span className="text-[9px] font-black text-indigo-600/60 uppercase tracking-widest">
+              Version {APP_VERSION}
+            </span>
+          </div>
         </div>
       </div>
 
