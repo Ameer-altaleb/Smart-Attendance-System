@@ -656,6 +656,14 @@ const AttendancePublic: React.FC = () => {
               {matchedCenter ? `IP: ${userIP}` : 'Dynamic Network'}
             </span>
           </div>
+          {settings.appVersion && (
+            <div className="flex items-center gap-2">
+              <div className="h-6 w-[1px] bg-slate-200 hidden md:block"></div>
+              <span className="text-[9px] font-black text-indigo-600/60 uppercase tracking-widest">
+                Version {settings.appVersion}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
