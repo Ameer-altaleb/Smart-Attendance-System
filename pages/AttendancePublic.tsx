@@ -326,12 +326,15 @@ const AttendancePublic: React.FC = () => {
             latitude: userLocation?.lat,
             longitude: userLocation?.lon
           };
-          await addAttendance(record);
+          setMessage({ text: 'جاري تأمین البصمة في النظام، يرجى الانتظار...', type: 'success' });
+          const success = await addAttendance(record);
 
-          // Realtime handles the update
-
-          const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
-          setMessage({ text: template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح', type: 'success' });
+          if (success) {
+            const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
+            setMessage({ text: template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح', type: 'success' });
+          } else {
+            setMessage({ text: 'تنبيه: فشل المزامنة مع السيرفر. تم الحفظ في جهازك فقط، يرجى إبقاء هذه الصفحة مفتوحة لضمان المزامنة التلقائية.', type: 'security' });
+          }
         }
       } else {
         if (!hasOpenRecord) {
@@ -346,7 +349,7 @@ const AttendancePublic: React.FC = () => {
 
           const hours = calculateWorkingHours(new Date(recentRecord.checkIn!), now);
 
-          await updateAttendance({
+          const updatedRecord = {
             ...recentRecord,
             checkOut: now.toISOString(),
             checkOutDate: format(now, 'yyyy-MM-dd'),
@@ -354,12 +357,17 @@ const AttendancePublic: React.FC = () => {
             workingHours: hours,
             latitude: userLocation?.lat,
             longitude: userLocation?.lon
-          });
+          };
 
-          // Realtime handles the update
+          setMessage({ text: 'جاري تأمين بصمة الخروج في النظام، يرجى الانتظار...', type: 'success' });
+          const success = await updateAttendance(updatedRecord);
 
-          const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
-          setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
+          if (success) {
+            const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
+            setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
+          } else {
+            setMessage({ text: 'تنبيه: فشل المزامنة مع السيرفر. تم الحفظ في جهازك فقط، يرجى إبقاء هذه الصفحة مفتوحة لضمان المزامنة التلقائية.', type: 'security' });
+          }
         }
       }
       // Removed immediate refreshData('attendance') to prevent race condition
@@ -617,7 +625,9 @@ const AttendancePublic: React.FC = () => {
                     <div className="absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 group-hover:from-emerald-600 group-hover:to-emerald-800 transition-all"></div>
                     <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-emerald-200">
                       {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogIn className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
-                      <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">تسجيل حضور العمل</span>
+                      <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
+                        {isSubmitting ? 'جاري تأمين البصمة...' : 'تسجيل حضور العمل'}
+                      </span>
                       <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
                     </div>
                   </button>
@@ -630,7 +640,9 @@ const AttendancePublic: React.FC = () => {
                     <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-indigo-700 group-hover:from-indigo-600 group-hover:to-indigo-800 transition-all"></div>
                     <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-indigo-200">
                       {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogOut className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
-                      <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">تسجيل انصراف العمل</span>
+                      <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
+                        {isSubmitting ? 'جاري تأمين الانصراف...' : 'تسجيل انصراف العمل'}
+                      </span>
                       <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
                     </div>
                   </button>
