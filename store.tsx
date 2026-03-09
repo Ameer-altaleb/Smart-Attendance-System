@@ -35,8 +35,8 @@ interface AppContextType {
   addEmployee: (employee: Employee) => Promise<void>;
   updateEmployee: (employee: Employee) => Promise<void>;
   deleteEmployee: (id: string) => Promise<void>;
-  addAttendance: (record: AttendanceRecord) => Promise<void>;
-  updateAttendance: (record: AttendanceRecord) => Promise<void>;
+  addAttendance: (record: AttendanceRecord) => Promise<boolean>;
+  updateAttendance: (record: AttendanceRecord) => Promise<boolean>;
   addNotification: (notification: Notification) => Promise<void>;
   deleteNotification: (id: string) => Promise<void>;
   updateTemplate: (template: MessageTemplate) => Promise<void>;
@@ -389,7 +389,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     tableName: string,
     operation: () => Promise<any>,
     onComplete?: (success: boolean) => void
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     updatePendingOps(tableName, 1);
     let success = false;
 
@@ -409,10 +409,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       onComplete?.(success);
       updatePendingOps(tableName, -1);
+      return success;
     } catch (error) {
       console.error(`Execution error in ${tableName}:`, error);
       onComplete?.(false);
       updatePendingOps(tableName, -1);
+      return false;
     }
   }, [updatePendingOps]);
 
@@ -452,40 +454,52 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [executeDbOperation]);
 
   // Attendance CRUD with optimistic updates
-  const addAttendance = useCallback(async (r: AttendanceRecord) => {
+  const addAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
     const record = { ...r, syncStatus: 'pending' as const };
-    setAttendance(prev => [...prev, record]);
+    setAttendance(prev => {
+      const next = [...prev, record];
+      storageManager.scheduleSave('attendance', next);
+      return next;
+    });
+    storageManager.forceFlush(); // الحفظ الفوري والقطعي للبيانات المحلية قبل بدء أي طلب شبكة
 
     // إزالة الحقل المحلي قبل الإرسال لقاعدة البيانات
     const { syncStatus, ...dbRecord } = r;
 
-    executeDbOperation('attendance',
-      () => supabase!.from('attendance').insert(dbRecord),
+    return await executeDbOperation('attendance',
+      () => supabase!.from('attendance').upsert(dbRecord),
       (success) => {
-        if (success) {
-          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
-        } else {
-          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
-        }
+        setAttendance(prev => {
+          const next = prev.map(item => item.id === r.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item);
+          storageManager.scheduleSave('attendance', next);
+          return next;
+        });
+        storageManager.forceFlush();
       }
     );
   }, [executeDbOperation]);
 
-  const updateAttendance = useCallback(async (r: AttendanceRecord) => {
+  const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
     const record = { ...r, syncStatus: 'pending' as const };
-    setAttendance(prev => prev.map(item => item.id === r.id ? record : item));
+    setAttendance(prev => {
+      const next = prev.map(item => item.id === r.id ? record : item);
+      storageManager.scheduleSave('attendance', next);
+      return next;
+    });
+    storageManager.forceFlush(); // الحفظ الفوري والقطعي للبيانات المحلية قبل بدء أي طلب شبكة
 
     // إزالة الحقل المحلي قبل الإرسال لقاعدة البيانات
     const { syncStatus, ...dbRecord } = r;
 
-    executeDbOperation('attendance',
-      () => supabase!.from('attendance').update(dbRecord).eq('id', r.id),
+    return await executeDbOperation('attendance',
+      () => supabase!.from('attendance').upsert(dbRecord),
       (success) => {
-        if (success) {
-          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
-        } else {
-          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
-        }
+        setAttendance(prev => {
+          const next = prev.map(item => item.id === r.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item);
+          storageManager.scheduleSave('attendance', next);
+          return next;
+        });
+        storageManager.forceFlush();
       }
     );
   }, [executeDbOperation]);
