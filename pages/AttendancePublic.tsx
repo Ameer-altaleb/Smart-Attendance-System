@@ -139,16 +139,14 @@ const AttendancePublic: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const loadAttendanceData = async () => {
-      setIsAttendanceLoading(true);
-      try {
-        await refreshData('attendance');
-        await refreshData('employees');
-      } finally {
-        setIsAttendanceLoading(false);
-      }
-    };
-    loadAttendanceData();
+    // Trigger a full data refresh from the database
+    // Data from localStorage cache is already available instantly
+    refreshData();
+    // Show loading indicator briefly while DB sync completes
+    const timer = setTimeout(() => {
+      setIsAttendanceLoading(false);
+    }, 3000); // 3 seconds max wait for DB response
+    return () => clearTimeout(timer);
   }, [refreshData]);
 
   useEffect(() => {
