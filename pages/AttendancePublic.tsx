@@ -49,6 +49,7 @@ const AttendancePublic: React.FC = () => {
   const [activeNotification, setActiveNotification] = useState<Notification | null>(null);
   const [ipLoading, setIpLoading] = useState(true);
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(true);
+  const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
 
   // Robust Network Time Sync Logic targeting Syria/Turkey Time
   const syncWithNetworkTime = async () => {
@@ -595,6 +596,52 @@ const AttendancePublic: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* عداد ساعات العمل اللحظي */}
+                    {todayRecord?.checkIn && !todayRecord?.checkOut && (() => {
+                      const checkInTime = new Date(todayRecord.checkIn!);
+                      const diffMs = currentTime.getTime() - checkInTime.getTime();
+                      const diffHrs = Math.floor(diffMs / 3600000);
+                      const diffMins = Math.floor((diffMs % 3600000) / 60000);
+                      return (
+                        <div className="p-4 bg-gradient-to-l from-emerald-50 to-indigo-50 border border-emerald-100/50 rounded-2xl flex items-center justify-between animate-in fade-in duration-500">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
+                              <Clock className="w-5 h-5 text-indigo-600" />
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-bold text-slate-500">ساعات العمل حتى الآن</p>
+                              <p className="text-lg font-black text-slate-900" dir="ltr">{diffHrs}h {diffMins}m</p>
+                            </div>
+                          </div>
+                          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ملخص اليوم بعد تسجيل الخروج */}
+                    {todayRecord?.checkIn && todayRecord?.checkOut && (
+                      <div className="p-5 bg-gradient-to-l from-indigo-50 to-slate-50 border border-indigo-100/50 rounded-2xl space-y-3 animate-in fade-in duration-500">
+                        <div className="flex items-center gap-2 mb-1">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">ملخص يوم العمل</p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="text-center p-3 bg-white rounded-xl shadow-sm">
+                            <p className="text-[9px] font-bold text-slate-400 mb-1">الدخول</p>
+                            <p className="text-sm font-black text-emerald-700" dir="ltr">{format(new Date(todayRecord.checkIn!), 'hh:mm a', { locale: ar })}</p>
+                          </div>
+                          <div className="text-center p-3 bg-white rounded-xl shadow-sm">
+                            <p className="text-[9px] font-bold text-slate-400 mb-1">الخروج</p>
+                            <p className="text-sm font-black text-indigo-700" dir="ltr">{format(new Date(todayRecord.checkOut!), 'hh:mm a', { locale: ar })}</p>
+                          </div>
+                          <div className="text-center p-3 bg-white rounded-xl shadow-sm">
+                            <p className="text-[9px] font-bold text-slate-400 mb-1">الساعات</p>
+                            <p className="text-sm font-black text-slate-900">{todayRecord.workingHours}h</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {isAttendanceLoading && !todayRecord && (
                       <div className="p-5 bg-indigo-50/50 border border-indigo-100 rounded-2xl flex items-center gap-4 animate-pulse">
                         <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
@@ -635,39 +682,64 @@ const AttendancePublic: React.FC = () => {
                 );
               })()}
 
-              {matchedCenter && (
-                <div className="flex flex-col md:flex-row gap-5 md:gap-6 pt-4 animate-in fade-in slide-in-from-top-4 duration-700 delay-500">
-                  <button
-                    onClick={() => handleAction('in')}
-                    disabled={!selectedEmployeeId || isSubmitting}
-                    className="flex-1 group relative overflow-hidden rounded-[2.2rem] transition-all active:scale-[0.98] disabled:opacity-30"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 group-hover:from-emerald-600 group-hover:to-emerald-800 transition-all"></div>
-                    <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-emerald-200">
-                      {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogIn className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
-                      <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
-                        {isSubmitting ? 'جاري تأمين البصمة...' : 'تسجيل حضور العمل'}
-                      </span>
-                      <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
-                    </div>
-                  </button>
+              {matchedCenter && (() => {
+                const todayStr = format(currentTime, 'yyyy-MM-dd');
+                let todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
+                const localEmployee = employees.find(e => e.id === selectedEmployeeId);
+                const isShiftWorker = localEmployee?.workType === 'shifts';
+                if (isShiftWorker) {
+                  const recentRecord = [...attendance]
+                    .filter(a => a.employeeId === selectedEmployeeId)
+                    .sort((a, b) => new Date(b.checkIn!).getTime() - new Date(a.checkIn!).getTime())[0];
+                  if (recentRecord && !recentRecord.checkOut) todayRecord = recentRecord;
+                }
 
-                  <button
-                    onClick={() => handleAction('out')}
-                    disabled={!selectedEmployeeId || isSubmitting}
-                    className="flex-1 group relative overflow-hidden rounded-[2.2rem] transition-all active:scale-[0.98] disabled:opacity-30"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-indigo-700 group-hover:from-indigo-600 group-hover:to-indigo-800 transition-all"></div>
-                    <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-indigo-200">
-                      {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogOut className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
-                      <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
-                        {isSubmitting ? 'جاري تأمين الانصراف...' : 'تسجيل انصراف العمل'}
-                      </span>
-                      <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
-                    </div>
-                  </button>
-                </div>
-              )}
+                const hasCheckedIn = !!todayRecord?.checkIn;
+                const hasCheckedOut = !!todayRecord?.checkOut;
+                const showCheckIn = !hasCheckedIn || (isShiftWorker && hasCheckedOut);
+                const showCheckOut = hasCheckedIn && !hasCheckedOut;
+
+                // Don't show buttons if day is complete (checked in and out) for admin staff
+                if (hasCheckedIn && hasCheckedOut && !isShiftWorker) return null;
+
+                return (
+                  <div className="flex flex-col md:flex-row gap-5 md:gap-6 pt-4 animate-in fade-in slide-in-from-top-4 duration-700 delay-500">
+                    {showCheckIn && (
+                      <button
+                        onClick={() => handleAction('in')}
+                        disabled={!selectedEmployeeId || isSubmitting}
+                        className="flex-1 group relative overflow-hidden rounded-[2.2rem] transition-all active:scale-[0.98] disabled:opacity-30"
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 group-hover:from-emerald-600 group-hover:to-emerald-800 transition-all"></div>
+                        <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-emerald-200">
+                          {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogIn className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
+                          <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
+                            {isSubmitting ? 'جاري تأمين البصمة...' : 'تسجيل حضور العمل'}
+                          </span>
+                          <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
+                        </div>
+                      </button>
+                    )}
+
+                    {showCheckOut && (
+                      <button
+                        onClick={() => setShowCheckoutConfirm(true)}
+                        disabled={!selectedEmployeeId || isSubmitting}
+                        className="flex-1 group relative overflow-hidden rounded-[2.2rem] transition-all active:scale-[0.98] disabled:opacity-30"
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-indigo-700 group-hover:from-indigo-600 group-hover:to-indigo-800 transition-all"></div>
+                        <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-indigo-200">
+                          {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogOut className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
+                          <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
+                            {isSubmitting ? 'جاري تأمين الانصراف...' : 'تسجيل انصراف العمل'}
+                          </span>
+                          <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -697,6 +769,40 @@ const AttendancePublic: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Checkout Confirmation Modal */}
+      {showCheckoutConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-sm shadow-[0_50px_100px_-20px_rgba(0,0,0,0.2)] overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-8 text-center space-y-6">
+              <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                <LogOut className="w-8 h-8" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-black text-slate-900 tracking-tight">تأكيد تسجيل الانصراف</h3>
+                <p className="text-sm text-slate-500 font-bold">هل أنت متأكد أنك تريد تسجيل انصرافك الآن؟</p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCheckoutConfirm(false)}
+                  className="flex-1 bg-slate-100 text-slate-700 font-black py-4 rounded-2xl hover:bg-slate-200 transition-all text-sm"
+                >
+                  إلغاء
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCheckoutConfirm(false);
+                    handleAction('out');
+                  }}
+                  className="flex-1 bg-indigo-600 text-white font-black py-4 rounded-2xl hover:bg-indigo-700 transition-all text-sm shadow-lg shadow-indigo-200 active:scale-95"
+                >
+                  نعم، سجل الانصراف
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeNotification && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-700">
