@@ -366,7 +366,7 @@ const AttendancePublic: React.FC = () => {
             const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
             setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
           } else {
-            setMessage({ text: 'تنبيه: فشل المزامنة مع السيرفر. تم الحفظ في جهازك فقط، يرجى إبقاء هذه الصفحة مفتوحة لضمان المزامنة التلقائية.', type: 'security' });
+            setMessage({ text: 'فشل الاتصال بالنظام المركزي. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.', type: 'security' });
           }
         }
       }
