@@ -63,7 +63,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [centers, setCenters] = useState<Center[]>(() => storageManager.load('centers', INITIAL_CENTERS));
   const [employees, setEmployees] = useState<Employee[]>(() => storageManager.load('employees', INITIAL_EMPLOYEES));
   const [admins, setAdmins] = useState<Admin[]>(() => storageManager.load('admins', INITIAL_ADMINS));
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => storageManager.load('attendance', []));
   const [holidays, setHolidays] = useState<Holiday[]>(() => storageManager.load('holidays', INITIAL_HOLIDAYS));
   const [projects, setProjects] = useState<Project[]>(() => storageManager.load('projects', INITIAL_PROJECTS));
   const [notifications, setNotifications] = useState<Notification[]>(() => storageManager.load('notifications', INITIAL_NOTIFICATIONS));
@@ -87,6 +87,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => { storageManager.scheduleSave('employees', employees); }, [employees]);
   useEffect(() => { storageManager.scheduleSave('admins', admins); }, [admins]);
 
+  useEffect(() => { storageManager.scheduleSave('attendance', attendance); }, [attendance]);
   useEffect(() => { storageManager.scheduleSave('holidays', holidays); }, [holidays]);
   useEffect(() => { storageManager.scheduleSave('projects', projects); }, [projects]);
   useEffect(() => { storageManager.scheduleSave('notifications', notifications); }, [notifications]);
@@ -215,11 +216,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 4. CRUD and Specialized Functions ---
   const retrySync = useCallback(async () => {
-    // Attendance skipping - focused on real-time only per requirements
-    // Keeping this for notifications or other pending items if necessary
+    // Sync pending notifications
     const pendingNotifs = notifications.filter(n => n.syncStatus === 'pending' || n.syncStatus === 'failed');
-    if (pendingNotifs.length === 0) return;
-    
     for (const n of pendingNotifs) {
       const { syncStatus, ...dbRecord } = n;
       executeDbOperation('notifications',
@@ -232,6 +230,79 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       );
     }
   }, [notifications, executeDbOperation]);
+
+  // Deep recovery: scan localStorage for old attendance records and push to DB
+  const recoverLocalAttendance = useCallback(async () => {
+    if (!checkSupabaseConnection() || !supabase) return;
+    
+    try {
+      const raw = localStorage.getItem('attendance');
+      if (!raw) return;
+      
+      const localRecords: AttendanceRecord[] = JSON.parse(raw);
+      if (!Array.isArray(localRecords) || localRecords.length === 0) return;
+
+      console.log(`[Recovery] Found ${localRecords.length} records in localStorage, scanning for unsynced...`);
+
+      // Filter records that are not marked as synced or have no sync status
+      const unsyncedRecords = localRecords.filter(
+        r => !r.syncStatus || r.syncStatus !== 'synced'
+      );
+
+      if (unsyncedRecords.length === 0) {
+        // All records are synced, clean up localStorage
+        localStorage.removeItem('attendance');
+        console.log('[Recovery] All local records already synced. Cleaned up localStorage.');
+        return;
+      }
+
+      console.log(`[Recovery] Found ${unsyncedRecords.length} unsynced records. Pushing to database...`);
+      let successCount = 0;
+
+      for (const record of unsyncedRecords) {
+        const { syncStatus, ...dbRecord } = record;
+        try {
+          const { error } = await supabase.from('attendance').upsert(dbRecord);
+          if (!error) {
+            successCount++;
+            // Update local state with the synced record
+            setAttendance(prev => {
+              const exists = prev.some(a => a.id === record.id);
+              if (exists) {
+                return prev.map(a => a.id === record.id ? { ...record, syncStatus: 'synced' } : a);
+              } else {
+                return [...prev, { ...record, syncStatus: 'synced' }];
+              }
+            });
+          } else {
+            console.error(`[Recovery] Failed to sync record ${record.id}:`, error);
+          }
+        } catch (err) {
+          console.error(`[Recovery] Error syncing record ${record.id}:`, err);
+        }
+      }
+
+      console.log(`[Recovery] Successfully synced ${successCount}/${unsyncedRecords.length} records.`);
+
+      // Clean up localStorage after recovery
+      if (successCount > 0) {
+        // Update localStorage to mark all recovered records as synced
+        const updatedLocal = localRecords.map(r => {
+          const wasSynced = unsyncedRecords.find(u => u.id === r.id);
+          return wasSynced ? { ...r, syncStatus: 'synced' as const } : r;
+        });
+        localStorage.setItem('attendance', JSON.stringify(updatedLocal));
+      }
+
+      // If all records are now synced, remove from localStorage entirely
+      if (successCount === unsyncedRecords.length) {
+        localStorage.removeItem('attendance');
+        console.log('[Recovery] All records synced. Cleaned up localStorage completely.');
+      }
+    } catch (err) {
+      console.error('[Recovery] Failed to parse localStorage attendance:', err);
+    }
+  }, []);
 
   const addCenter = useCallback(async (c: Center) => {
     setCenters(prev => [...prev, c]);
@@ -407,6 +478,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (checkSupabaseConnection()) {
         await refreshData();
         await retrySync();
+        await recoverLocalAttendance();
         setIsRealtimeConnected(true);
       } else {
         const tables = ['centers', 'employees', 'admins', 'attendance', 'holidays', 'notifications', 'templates', 'settings', 'projects'];
@@ -417,7 +489,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     init();
-    const interval = setInterval(() => { if (navigator.onLine) retrySync(); }, 300000);
+    const interval = setInterval(() => { if (navigator.onLine) { retrySync(); recoverLocalAttendance(); } }, 300000);
     return () => clearInterval(interval);
   }, [refreshData, retrySync]);
 
@@ -425,7 +497,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!checkSupabaseConnection() || !supabase) return;
     const channel = supabase.channel('schema-db-changes')
       .on('broadcast', { event: 'force-refresh' }, () => { window.location.reload(); })
-      .on('broadcast', { event: 'sync-local-records' }, () => { retrySync(); })
+      .on('broadcast', { event: 'sync-local-records' }, () => { recoverLocalAttendance(); })
       .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
         const { table, eventType, new: newRecord, old: oldRecord } = payload;
         if (!isMounted.current) return;
