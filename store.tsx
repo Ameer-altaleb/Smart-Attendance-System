@@ -154,6 +154,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const { data, error } = await withRetry(async () => {
         let query = supabase.from(tableName).select('*');
         if (['employees', 'projects'].includes(tableName)) query = query.is('deleted_at', null);
+        // Attendance: only fetch last 60 days to avoid loading thousands of old records
+        if (tableName === 'attendance') {
+          const cutoffDate = new Date();
+          cutoffDate.setDate(cutoffDate.getDate() - 60);
+          query = query.gte('date', cutoffDate.toISOString().split('T')[0]);
+        }
         return await query;
       });
       if (error) throw error;
