@@ -63,7 +63,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [centers, setCenters] = useState<Center[]>(() => storageManager.load('centers', INITIAL_CENTERS));
   const [employees, setEmployees] = useState<Employee[]>(() => storageManager.load('employees', INITIAL_EMPLOYEES));
   const [admins, setAdmins] = useState<Admin[]>(() => storageManager.load('admins', INITIAL_ADMINS));
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => storageManager.load('attendance', []));
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>(() => storageManager.load('holidays', INITIAL_HOLIDAYS));
   const [projects, setProjects] = useState<Project[]>(() => storageManager.load('projects', INITIAL_PROJECTS));
   const [notifications, setNotifications] = useState<Notification[]>(() => storageManager.load('notifications', INITIAL_NOTIFICATIONS));
@@ -86,7 +86,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => { storageManager.scheduleSave('centers', centers); }, [centers]);
   useEffect(() => { storageManager.scheduleSave('employees', employees); }, [employees]);
   useEffect(() => { storageManager.scheduleSave('admins', admins); }, [admins]);
-  useEffect(() => { storageManager.scheduleSave('attendance', attendance); }, [attendance]);
+
   useEffect(() => { storageManager.scheduleSave('holidays', holidays); }, [holidays]);
   useEffect(() => { storageManager.scheduleSave('projects', projects); }, [projects]);
   useEffect(() => { storageManager.scheduleSave('notifications', notifications); }, [notifications]);
@@ -215,21 +215,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 4. CRUD and Specialized Functions ---
   const retrySync = useCallback(async () => {
-    const pending = attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed');
-    if (pending.length === 0) return;
-    for (const record of pending) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { syncStatus, ...dbRecord } = record;
-      executeDbOperation('attendance',
-        () => supabase!.from('attendance').upsert(dbRecord),
+    // Attendance skipping - focused on real-time only per requirements
+    // Keeping this for notifications or other pending items if necessary
+    const pendingNotifs = notifications.filter(n => n.syncStatus === 'pending' || n.syncStatus === 'failed');
+    if (pendingNotifs.length === 0) return;
+    
+    for (const n of pendingNotifs) {
+      const { syncStatus, ...dbRecord } = n;
+      executeDbOperation('notifications',
+        () => supabase!.from('notifications').insert(dbRecord),
         (success) => {
           if (success) {
-            setAttendance(prev => prev.map(item => item.id === record.id ? { ...item, syncStatus: 'synced' } : item));
+            setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, syncStatus: 'synced' } : item));
           }
         }
       );
     }
-  }, [attendance, executeDbOperation]);
+  }, [notifications, executeDbOperation]);
 
   const addCenter = useCallback(async (c: Center) => {
     setCenters(prev => [...prev, c]);
@@ -264,49 +266,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [executeDbOperation]);
 
   const addAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
-    const record = { ...r, syncStatus: 'pending' as const };
-    setAttendance(prev => {
-      const next = [...prev, record];
-      storageManager.scheduleSave('attendance', next);
-      return next;
-    });
-    storageManager.forceFlush();
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { syncStatus, ...dbRecord } = r;
-    return await executeDbOperation('attendance',
-      () => supabase!.from('attendance').upsert(dbRecord),
-      (success) => {
-        setAttendance(prev => {
-          const next = prev.map(item => item.id === r.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item);
-          storageManager.scheduleSave('attendance', next);
-          return next;
-        });
-        storageManager.forceFlush();
-      }
+
+    // Start DB operation first (direct sync)
+    const success = await executeDbOperation('attendance',
+      () => supabase!.from('attendance').upsert(dbRecord)
     );
+
+    if (success) {
+      setAttendance(prev => {
+        const next = [...prev, { ...r, syncStatus: 'synced' }];
+        return next;
+      });
+      return true;
+    }
+    
+    return false;
   }, [executeDbOperation]);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
-    const record = { ...r, syncStatus: 'pending' as const };
-    setAttendance(prev => {
-      const next = prev.map(item => item.id === r.id ? record : item);
-      storageManager.scheduleSave('attendance', next);
-      return next;
-    });
-    storageManager.forceFlush();
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { syncStatus, ...dbRecord } = r;
-    return await executeDbOperation('attendance',
-      () => supabase!.from('attendance').upsert(dbRecord),
-      (success) => {
-        setAttendance(prev => {
-          const next = prev.map(item => item.id === r.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item);
-          storageManager.scheduleSave('attendance', next);
-          return next;
-        });
-        storageManager.forceFlush();
-      }
+
+    // Direct sync to DB
+    const success = await executeDbOperation('attendance',
+      () => supabase!.from('attendance').upsert(dbRecord)
     );
+
+    if (success) {
+      setAttendance(prev => {
+        const next = prev.map(item => item.id === r.id ? { ...r, syncStatus: 'synced' } : item);
+        return next;
+      });
+      return true;
+    }
+    
+    return false;
   }, [executeDbOperation]);
 
   const addNotification = useCallback(async (n: Notification) => {
