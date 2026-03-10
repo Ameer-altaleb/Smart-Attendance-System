@@ -147,11 +147,17 @@ const Dashboard: React.FC = () => {
     });
   }, [attendance, activeCenterIds]);
 
-  // Recent logs (last 5, reversed)
-  const recentLogs = useMemo(() =>
-    todayRecords.slice(-5).reverse(),
-    [todayRecords]
-  );
+  // Recent logs (last 10, sorted by most recent timestamp)
+  const recentLogs = useMemo(() => {
+    return [...attendance]
+      .filter(a => a.checkIn) // Must have at least a check-in
+      .sort((a, b) => {
+        const timeA = new Date(a.checkOut || a.checkIn!).getTime();
+        const timeB = new Date(b.checkOut || b.checkIn!).getTime();
+        return timeB - timeA;
+      })
+      .slice(0, 10);
+  }, [attendance]);
 
   // Center statistics for progress bars
   const centerStats = useMemo(() =>
