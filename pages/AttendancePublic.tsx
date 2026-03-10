@@ -48,6 +48,7 @@ const AttendancePublic: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeNotification, setActiveNotification] = useState<Notification | null>(null);
   const [ipLoading, setIpLoading] = useState(true);
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState(true);
 
   // Robust Network Time Sync Logic targeting Syria/Turkey Time
   const syncWithNetworkTime = async () => {
@@ -138,7 +139,16 @@ const AttendancePublic: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    refreshData('employees');
+    const loadAttendanceData = async () => {
+      setIsAttendanceLoading(true);
+      try {
+        await refreshData('attendance');
+        await refreshData('employees');
+      } finally {
+        setIsAttendanceLoading(false);
+      }
+    };
+    loadAttendanceData();
   }, [refreshData]);
 
   useEffect(() => {
@@ -587,7 +597,19 @@ const AttendancePublic: React.FC = () => {
                       </div>
                     </div>
 
-                    {!todayRecord && (
+                    {isAttendanceLoading && !todayRecord && (
+                      <div className="p-5 bg-indigo-50/50 border border-indigo-100 rounded-2xl flex items-center gap-4 animate-pulse">
+                        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                          <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-black text-indigo-800">جاري الاتصال بالنظام المركزي...</p>
+                          <p className="text-[10px] font-bold text-indigo-500">يتم استرجاع سجلاتك من قاعدة البيانات</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {!isAttendanceLoading && !todayRecord && (
                       <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-center gap-3">
                         <Clock className="w-5 h-5 text-amber-500" />
                         <p className="text-sm font-black text-amber-800">لم تبدأ العمل اليوم بعد</p>
