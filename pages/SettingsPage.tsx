@@ -20,7 +20,7 @@ interface SyncLog {
 const SettingsPage: React.FC = () => {
   const {
     settings, updateSettings, currentUser, updateAdmin,
-    isRealtimeConnected, dbStatus, refreshData, testConnection, sendRemoteRefresh
+    isRealtimeConnected, dbStatus, refreshData, testConnection, sendRemoteRefresh, requestDataRecovery
   } = useApp();
 
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -166,6 +166,20 @@ const SettingsPage: React.FC = () => {
                   title="تحديث إجباري لجميع الأجهزة"
                 >
                   <ArrowRightLeft className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={async () => {
+                    if (confirm('سيتم إرسال أمر لكافة أجهزة الموظفين لسحب أي بصمات مخزنة محلياً ولم ترفع بعد. هل تريد المتابعة؟')) {
+                      addLog('إرسال طلب استعادة البيانات (Data Recovery Request)...', 'command');
+                      await requestDataRecovery();
+                      addLog('تم بث طلب المزامنة لكافة الأجهزة النشطة.', 'success');
+                      triggerSuccess('تم إرسال طلب سحب البيانات');
+                    }
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 text-white p-3 rounded-2xl transition-all border border-white/10"
+                  title="سحب البصمات المحلية من أجهزة الموظفين"
+                >
+                  <DatabaseBackup className="w-5 h-5" />
                 </button>
                 <button
                   onClick={runDiagnosticAnalysis}
