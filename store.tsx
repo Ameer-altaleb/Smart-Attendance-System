@@ -54,6 +54,9 @@ interface AppContextType {
   retrySync: () => Promise<void>;
   sendRemoteRefresh: () => Promise<void>;
   requestDataRecovery: () => Promise<void>;
+  timeOffset: number;
+  currentTime: Date;
+  isTimeSynced: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -76,6 +79,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [pendingOperations, setPendingOperations] = useState(0);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
+  
+  // --- Global Time Sync State ---
+  const [timeOffset, setTimeOffset] = useState(0);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [isTimeSynced, setIsTimeSynced] = useState(false);
 
   const isMounted = useRef(true);
   useEffect(() => {
@@ -152,12 +160,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       setDbStatus(prev => ({ ...prev, [tableName]: 'checking' }));
       const { data, error } = await withRetry(async () => {
-        let query = supabase.from(tableName).select('*');
+        let query = supabase!.from(tableName).select('*');
         if (['employees', 'projects'].includes(tableName)) query = query.is('deleted_at', null);
-        // Attendance: only fetch last 60 days to avoid loading thousands of old records
+        
+        // Attendance: only fetch recent history to avoid loading thousands of old records
         if (tableName === 'attendance') {
-          const cutoffDate = new Date();
-          cutoffDate.setDate(cutoffDate.getDate() - 60);
+          // Use synced time for cutoff to ensure consistency across devices
+          const cutoffDate = new Date(Date.now() + timeOffset);
+          // Broaden to 90 days to handle edge case of devices offline for long periods
+          cutoffDate.setDate(cutoffDate.getDate() - 90);
           query = query.gte('date', cutoffDate.toISOString().split('T')[0]);
         }
         return await query;
@@ -170,14 +181,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setter((prev: any[]) => {
             const existingMap = new Map(prev.map(item => [item.id, item]));
             
-            // Track IDs from server to handle deletions if necessary, 
-            // but here we primarily want to merge.
+            // For tables where we fetch a specific window (like attendance),
+            // we need to identify records that might have been deleted on the server.
+            if (tableName === 'attendance') {
+              const cutoffDate = new Date(Date.now() + timeOffset);
+              cutoffDate.setDate(cutoffDate.getDate() - 90);
+              const cutoffStr = cutoffDate.toISOString().split('T')[0];
+              
+              const serverIds = new Set(data.map((item: any) => item.id));
+              
+              // Remove records that are:
+              // 1. Within the fetch window (>= cutoffDate)
+              // 2. Not in the server response
+              // 3. Are marked as 'synced' (meaning they aren't local-only/unsynced changes)
+              prev.forEach(item => {
+                if (item.date >= cutoffStr && !serverIds.has(item.id) && item.syncStatus === 'synced') {
+                  existingMap.delete(item.id);
+                }
+              });
+            }
+
             data.forEach((newItem: any) => {
               const existing = existingMap.get(newItem.id);
-              
-              // Only update if:
-              // 1. It's a new record
-              // 2. The existing record is already marked as 'synced' (no local changes pending)
               if (!existing || existing.syncStatus === 'synced' || !existing.syncStatus) {
                 existingMap.set(newItem.id, { ...newItem, syncStatus: 'synced' });
               }
@@ -516,9 +541,60 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoading(false);
   };
 
-  // --- 5. Side Effects ---
+  // --- 5. Global Time Sync Logic ---
+  const syncWithNetworkTime = useCallback(async () => {
+    const timeAPIs = [
+      'https://timeapi.io/api/Time/current/zone?timeZone=Europe/Istanbul',
+      'https://worldtimeapi.org/api/timezone/Europe/Istanbul',
+      'https://worldtimeapi.org/api/timezone/Asia/Damascus'
+    ];
+
+    for (const apiUrl of timeAPIs) {
+      try {
+        const start = Date.now();
+        const response = await fetch(apiUrl, { cache: 'no-store' });
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        const remoteDateStr = data.dateTime || data.datetime;
+        const networkTime = new Date(remoteDateStr).getTime();
+
+        const end = Date.now();
+        const latency = (end - start) / 2;
+
+        const correctedNetworkTime = networkTime + latency;
+        const localDeviceTime = Date.now();
+
+        const offset = correctedNetworkTime - localDeviceTime;
+
+        if (Math.abs(offset) > 30000 || !isTimeSynced) {
+          setTimeOffset(offset);
+          setIsTimeSynced(true);
+        }
+        return;
+      } catch (err) {
+        console.warn(`[TimeSync] Failed with ${apiUrl}:`, err);
+      }
+    }
+  }, [isTimeSynced]);
+
+  useEffect(() => {
+    syncWithNetworkTime();
+    const interval = setInterval(syncWithNetworkTime, 300000); // Sync every 5 mins
+    return () => clearInterval(interval);
+  }, [syncWithNetworkTime]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date(Date.now() + timeOffset));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [timeOffset]);
+
+  // --- 6. Side Effects ---
   useEffect(() => {
     const init = async () => {
+      await syncWithNetworkTime();
       if (checkSupabaseConnection()) {
         await refreshData();
         await retrySync();
@@ -658,6 +734,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const contextValue = useMemo(() => ({
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
     currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations,
+    timeOffset, currentTime, isTimeSynced,
     setCurrentUser, addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee,
     deleteEmployee, addAttendance, updateAttendance, addNotification, deleteNotification,
     updateTemplate, updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday,
@@ -665,7 +742,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     retrySync, sendRemoteRefresh, requestDataRecovery
   }), [
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
-    currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations, refreshData,
+    currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations,
+    timeOffset, currentTime, isTimeSynced, refreshData,
     addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee, deleteEmployee,
     addAttendance, updateAttendance, addNotification, deleteNotification, updateTemplate,
     updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday, deleteHoliday,
