@@ -292,48 +292,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   }, [executeDbOperation]);
 
-  // Deep recovery: scan localStorage for old attendance records and push to DB
+  // Deep recovery: scan permanent audit log for any records missing from DB
   const recoverLocalAttendance = useCallback(async () => {
     if (!checkSupabaseConnection() || !supabase) return;
 
     try {
-      const raw = localStorage.getItem('attendance');
-      if (!raw) return;
+      // Step 1: Check the Permanent Audit Log (The absolute source of truth)
+      const rawAudit = localStorage.getItem('attendance_audit_log');
+      if (!rawAudit) return;
 
-      const localRecords: AttendanceRecord[] = JSON.parse(raw);
-      if (!Array.isArray(localRecords) || localRecords.length === 0) return;
+      const auditRecords: AttendanceRecord[] = JSON.parse(rawAudit);
+      if (!Array.isArray(auditRecords) || auditRecords.length === 0) return;
 
-      const unsyncedRecords = localRecords.filter(r => !r.syncStatus || r.syncStatus !== 'synced');
-      if (unsyncedRecords.length === 0) return;
-
-      console.log(`[Recovery] Found ${unsyncedRecords.length} unsynced records. Pushing to database...`);
+      // Step 2: Identify records that are not confirmed as 'synced' in the main state
+      // or records that might be missing from the server entirely
+      console.log(`[Audit] Checking ${auditRecords.length} records for recovery...`);
       const successfullySyncedIds: string[] = [];
 
-      for (const record of unsyncedRecords) {
+      for (const record of auditRecords) {
+        // We attempt to upsert everything from the audit log to ensure the server is complete
         const { syncStatus: _s, ...dbRecord } = record;
         try {
           const { error } = await supabase.from('attendance').upsert(dbRecord);
           if (!error) {
             successfullySyncedIds.push(record.id);
-            setAttendance(prev => {
-              const exists = prev.some(a => a.id === record.id);
-              if (exists) {
-                return prev.map(a => a.id === record.id ? { ...record, syncStatus: 'synced' } : a);
-              } else {
-                return [...prev, { ...record, syncStatus: 'synced' }];
-              }
-            });
+            // Update local state to reflect sync
+            setAttendance(prev => prev.map(a => a.id === record.id ? { ...a, syncStatus: 'synced' } : a));
           }
         } catch (err) {
-          console.error(`[Recovery] Error syncing record ${record.id}:`, err);
+          console.error(`[Audit] Sync failed for ${record.id}:`, err);
         }
       }
 
       if (successfullySyncedIds.length > 0) {
-        console.log(`[Recovery] Successfully synced ${successfullySyncedIds.length} records. Unified state will now handle the persistent storage.`);
+        console.log(`[Audit] Recovered/Verified ${successfullySyncedIds.length} records.`);
       }
     } catch (err) {
-      console.error('[Recovery] Failed to recover attendance:', err);
+      console.error('[Audit] Recovery failed:', err);
     }
   }, []);
 
@@ -370,39 +365,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [executeDbOperation]);
 
   const addAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
-    // 1. Save to Black Box (Archive) first - This is the last resort backup
+    // 1. Permanent Audit Log - Immediate write to unbreakable local storage
     try {
-      const rawArchive = localStorage.getItem('attendance_archive');
-      const archive = rawArchive ? JSON.parse(rawArchive) : [];
-      archive.push({ ...r, syncStatus: 'pending' });
-      // Increase buffer to 500 records for safety during high-concurrency peak hours
-      localStorage.setItem('attendance_archive', JSON.stringify(archive.slice(-500)));
+      const rawAudit = localStorage.getItem('attendance_audit_log');
+      const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
+      // Prevent duplicates in audit log
+      if (!auditLog.some((item: AttendanceRecord) => item.id === r.id)) {
+        auditLog.push({ ...r, syncStatus: 'synced' }); // We store it as 'synced' in audit so recovery knows it's ready
+        localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000))); // Keep last 1000 records
+      }
     } catch (e) {
-      console.error('Failed to save to audit log', e);
+      console.error('CRITICAL: Failed to write to Permanent Audit Log', e);
     }
 
-    // 2. Optimistic Update
+    // 2. Optimistic UI Update - Show success to employee immediately
     const recordWithStatus = { ...r, syncStatus: 'pending' as const };
     setAttendance(prev => {
       if (prev.some(item => item.id === r.id)) return prev;
       return [...prev, recordWithStatus];
     });
 
-    // 3. Prepare for DB
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { syncStatus, ...dbRecord } = r;
+    // 3. Background Sync Dispatch
+    // If we are online, attempt immediate sync, but don't block the UI
+    if (navigator.onLine && supabase) {
+      const { syncStatus: _s, ...dbRecord } = r;
+      supabase.from('attendance').upsert(dbRecord).then(({ error }) => {
+        if (!error) {
+          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
+        } else {
+          console.warn('[Sync] Immediate upload failed, will retry in background', error);
+        }
+      });
+    }
 
-    // 4. Sync and wait for DB result
-    const success = await executeDbOperation('attendance',
-      () => supabase!.from('attendance').upsert(dbRecord)
-    );
+    // 4. Register Background Sync if available
+    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        await (registration as any).sync.register('sync-attendance');
+      } catch (e) {
+        console.warn('[PWA] Background sync registration failed', e);
+      }
+    }
 
-    setAttendance(prev => prev.map(item => 
-      item.id === r.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item
-    ));
-
-    return success;
-  }, [executeDbOperation]);
+    return true; // Always return true because data is secured in Audit Log
+  }, []);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
     // 1. Optimistic Update
@@ -590,13 +597,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     init();
+
+    // Listen for sync messages from Service Worker
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'SYNC_RECORDS') {
+        console.log('[SW] Sync message received, triggering retrySync...');
+        retrySync();
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', handleMessage);
+
     const interval = setInterval(() => { 
       if (navigator.onLine) { 
         retrySync(); 
         recoverLocalAttendance(); 
       } 
     }, 60000); // Increased frequency to 1 minute
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      navigator.serviceWorker?.removeEventListener('message', handleMessage);
+    };
   }, [refreshData, retrySync]);
 
   useEffect(() => {

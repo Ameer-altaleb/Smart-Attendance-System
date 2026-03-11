@@ -10,9 +10,22 @@
       #root { min-height: 100vh; }
     </style>
     <link rel="stylesheet" href="/index.css">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#020617">
   </head>
   <body class="bg-slate-950">
     <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then(registration => {
+            console.log('SW registered: ', registration);
+          }).catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+          });
+        });
+      }
+    </script>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>
