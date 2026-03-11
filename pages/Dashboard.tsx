@@ -31,30 +31,35 @@ const StatCard = memo(({ stat, index }: { stat: any; index: number }) => (
 
 StatCard.displayName = 'StatCard';
 
-// Memoized Recent Log Item
-const RecentLogItem = memo(({ record, employee }: { record: any; employee: any }) => (
-  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-3xl border border-slate-100 hover:bg-white hover:shadow-md transition-all">
-    <div className="flex items-center gap-4">
-      <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center font-black text-xs">
+// Memoized Daily Summary Item
+const DailySummaryItem = memo(({ index, employee, record }: { index: number; employee: any; record?: any }) => (
+  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-white hover:shadow-md transition-all group">
+    <div className="flex items-center gap-4 flex-1">
+      <span className="text-[10px] font-black text-slate-400 w-5">{index}.</span>
+      <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center font-black text-[10px] group-hover:bg-indigo-600 group-hover:text-white transition-colors">
         {employee?.name.charAt(0) || 'U'}
       </div>
-      <div>
-        <p className="text-xs font-black text-slate-800">{employee?.name || 'موظف غير معروف'}</p>
-        <p className="text-[9px] text-slate-400 font-bold uppercase">{record.checkOut ? 'تسجيل انصراف' : 'تسجيل حضور'}</p>
-      </div>
+      <p className="text-xs font-black text-slate-800 truncate">{employee?.name || 'موظف غير معروف'}</p>
     </div>
-    <div className="text-left">
-      <p className="text-xs font-black text-slate-900">
-        {record.checkOut ? format(new Date(record.checkOut), 'HH:mm') : format(new Date(record.checkIn!), 'HH:mm')}
-      </p>
-      <div className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase inline-block ${record.status === 'late' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
-        {record.status === 'late' ? 'متأخر' : 'منضبط'}
+    
+    <div className="flex items-center gap-8 text-left">
+      <div className="flex flex-col items-start min-w-[60px]">
+        <span className="text-[8px] font-black text-slate-400 uppercase mb-0.5">دخول</span>
+        <p className="text-xs font-black text-emerald-600">
+          {record?.checkIn ? format(new Date(record.checkIn), 'HH:mm') : '-'}
+        </p>
+      </div>
+      <div className="flex flex-col items-start min-w-[60px]">
+        <span className="text-[8px] font-black text-slate-400 uppercase mb-0.5">خروج</span>
+        <p className="text-xs font-black text-indigo-600">
+          {record?.checkOut ? format(new Date(record.checkOut), 'HH:mm') : '-'}
+        </p>
       </div>
     </div>
   </div>
 ));
 
-RecentLogItem.displayName = 'RecentLogItem';
+DailySummaryItem.displayName = 'DailySummaryItem';
 
 // Memoized Center Progress Bar
 const CenterProgress = memo(({ center, percentage, records, totalEmps }: {
@@ -154,17 +159,28 @@ const Dashboard: React.FC = () => {
     });
   }, [attendance, activeCenterIds]);
 
-  // Recent logs (last 10, sorted by most recent timestamp)
-  const recentLogs = useMemo(() => {
-    return [...attendance]
-      .filter(a => a.checkIn) // Must have at least a check-in
-      .sort((a, b) => {
-        const timeA = new Date(a.checkOut || a.checkIn!).getTime();
-        const timeB = new Date(b.checkOut || b.checkIn!).getTime();
-        return timeB - timeA;
-      })
-      .slice(0, 10);
-  }, [attendance]);
+  // Daily Summary (List of all employees and their movements for today)
+  const dailySummary = useMemo(() => {
+    const summary: { employee: any; record?: any }[] = [];
+    
+    [...activeEmployees]
+      .sort((a, b) => a.name.localeCompare(b.name, 'ar'))
+      .forEach(emp => {
+        const empRecords = todayRecords
+          .filter(r => r.employeeId === emp.id)
+          .sort((a, b) => new Date(a.checkIn!).getTime() - new Date(b.checkIn!).getTime());
+          
+        if (empRecords.length === 0) {
+          summary.push({ employee: emp });
+        } else {
+          empRecords.forEach(rec => {
+            summary.push({ employee: emp, record: rec });
+          });
+        }
+      });
+      
+    return summary;
+  }, [activeEmployees, todayRecords]);
 
   // Center statistics for progress bars
   const centerStats = useMemo(() =>
@@ -310,21 +326,24 @@ const Dashboard: React.FC = () => {
       {/* Recent Activity & Centers Overview */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
         {/* Recent Logs (Filtered for Active Centers) */}
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-black text-slate-900 tracking-tight">أحدث عمليات التسجيل</h3>
-            <button className="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:underline">عرض الكل</button>
+        <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col h-[500px]">
+          <div className="flex items-center justify-between mb-8 shrink-0">
+            <h3 className="text-xl font-black text-slate-900 tracking-tight">سجل حركات اليوم</h3>
+            <div className="px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg text-[9px] font-black text-slate-400 uppercase tracking-widest">
+              {dailySummary.length} موظف
+            </div>
           </div>
-          <div className="space-y-4">
-            {recentLogs.map((record, i) => (
-              <RecentLogItem
-                key={record.id || i}
-                record={record}
-                employee={employeeMap.get(record.employeeId)}
+          <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar flex-1">
+            {dailySummary.map((item, i) => (
+              <DailySummaryItem
+                key={item.record?.id || `no-rec-${item.employee.id}`}
+                index={i + 1}
+                employee={item.employee}
+                record={item.record}
               />
             ))}
-            {todayRecords.length === 0 && (
-              <div className="py-20 text-center text-slate-300 font-bold italic">لا توجد عمليات تسجيل حتى الآن اليوم</div>
+            {dailySummary.length === 0 && (
+              <div className="py-20 text-center text-slate-300 font-bold italic">لا توجد سجلات للمراكز النشطة اليوم</div>
             )}
           </div>
         </div>
