@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import {
   LogIn, LogOut, CheckCircle2, ShieldAlert, Smartphone,
-  BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown
+  BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown, Save, RefreshCw
 } from 'lucide-react';
 import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance } from '../utils/attendanceLogic.ts';
 import { AttendanceRecord, Employee, Notification, Center } from '../types.ts';
@@ -22,7 +22,12 @@ const getDeviceId = () => {
 };
 
 const AttendancePublic: React.FC = () => {
-  const { centers, employees, attendance, addAttendance, updateAttendance, updateEmployee, templates, notifications, settings, refreshData } = useApp();
+  const { 
+    centers, employees, attendance, addAttendance, updateAttendance, 
+    updateEmployee, templates, notifications, settings, refreshData,
+    currentTime, timeOffset, isTimeSynced
+  } = useApp();
+  
   const [selectedCenterId, setSelectedCenterId] = useState(() => localStorage.getItem('last_center_id') || '');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => localStorage.getItem('last_emp_id') || '');
 
@@ -34,12 +39,6 @@ const AttendancePublic: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('last_emp_id', selectedEmployeeId);
   }, [selectedEmployeeId]);
-
-  // Time & Location State
-  const [timeOffset, setTimeOffset] = useState(0);
-  const [isTimeSynced, setIsTimeSynced] = useState(false);
-  const [syncError, setSyncError] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [userLocation, setUserLocation] = useState<{ lat: number, lon: number } | null>(null);
   const [locationStatus, setLocationStatus] = useState<'idle' | 'checking' | 'active' | 'denied' | 'out_of_range'>('idle');
 
@@ -52,45 +51,7 @@ const AttendancePublic: React.FC = () => {
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
 
   // Robust Network Time Sync Logic targeting Syria/Turkey Time
-  const syncWithNetworkTime = async () => {
-    const timeAPIs = [
-      'https://timeapi.io/api/Time/current/zone?timeZone=Europe/Istanbul',
-      'https://worldtimeapi.org/api/timezone/Europe/Istanbul',
-      'https://worldtimeapi.org/api/timezone/Asia/Damascus'
-    ];
-
-    for (const apiUrl of timeAPIs) {
-      try {
-        const start = Date.now();
-        const response = await fetch(apiUrl, { cache: 'no-store' });
-        if (!response.ok) throw new Error('API Response Error');
-
-        const data = await response.json();
-        const remoteDateStr = data.dateTime || data.datetime;
-        const networkTime = new Date(remoteDateStr).getTime();
-
-        const end = Date.now();
-        const latency = (end - start) / 2;
-
-        const correctedNetworkTime = networkTime + latency;
-        const localDeviceTime = Date.now();
-
-        const offset = correctedNetworkTime - localDeviceTime;
-
-        // Only apply offset if it's significant (> 30s) or if explicitly syncing
-        if (Math.abs(offset) > 30000 || !isTimeSynced) {
-          setTimeOffset(offset);
-          setIsTimeSynced(true);
-        }
-        setSyncError(false);
-        return;
-      } catch (err) {
-        console.warn(`Failed to sync with ${apiUrl}:`, err);
-      }
-    }
-    setIsTimeSynced(false);
-    setSyncError(true);
-  };
+  // Network Sync moved to store.tsx
 
   const syncLocation = () => {
     if (!navigator.geolocation) {
@@ -112,7 +73,6 @@ const AttendancePublic: React.FC = () => {
   };
 
   useEffect(() => {
-    syncWithNetworkTime();
     syncLocation();
 
     // IP Fetching with timeout
@@ -134,10 +94,18 @@ const AttendancePublic: React.FC = () => {
     };
 
     fetchIP();
+    
+    // Immediate sync when coming back online
+    const handleOnline = () => {
+      console.log('Device back online, triggering immediate sync...');
+      refreshData();
+    };
+    window.addEventListener('online', handleOnline);
 
-    const syncInterval = setInterval(syncWithNetworkTime, 300000);
-    return () => clearInterval(syncInterval);
-  }, []);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [refreshData]);
 
   useEffect(() => {
     // Trigger a full data refresh from the database
@@ -150,13 +118,7 @@ const AttendancePublic: React.FC = () => {
     return () => clearTimeout(timer);
   }, [refreshData]);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const syncedDate = new Date(Date.now() + timeOffset);
-      setCurrentTime(syncedDate);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [timeOffset]);
+  // Time handling moved to global store
 
   // Logic to identify the center based on IP
   const matchedCenter = useMemo(() => {
@@ -176,8 +138,11 @@ const AttendancePublic: React.FC = () => {
 
   const selectedCenter = useMemo(() => centers.find(c => c.id === selectedCenterId), [centers, selectedCenterId]);
 
-  // تم تعطيل التحقق الإجباري من الـ IP مؤقتاً بناءً على طلب المدير
-  const isIpAuthorized = true; // تم ضبطها لـ true لتجاوز الحجب
+  // تم تفعيل التحقق الإلزامي من الـ IP لضمان الأمان
+  const isIpAuthorized = useMemo(() => {
+    if (!selectedCenter || !selectedCenter.authorizedIP) return true;
+    return userIP === selectedCenter.authorizedIP;
+  }, [selectedCenter, userIP]);
 
   useEffect(() => {
     if (selectedEmployeeId) {
@@ -271,7 +236,7 @@ const AttendancePublic: React.FC = () => {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      const today = format(currentSyncedTime, 'yyyy-MM-dd');
+      const today = getTodayDateString();
 
       // العثور على أحدث سجل للموظف
       const recentRecord = [...attendance]
@@ -335,14 +300,28 @@ const AttendancePublic: React.FC = () => {
             latitude: userLocation?.lat,
             longitude: userLocation?.lon
           };
-          setMessage({ text: 'جاري تأمین البصمة في النظام، يرجى الانتظار...', type: 'success' });
+          setMessage({ text: 'جاري تأمين البصمة في النظام، يرجى الانتظار...', type: 'success' });
+          
+          const startTime = Date.now();
           const success = await addAttendance(record);
+          const elapsedTime = Date.now() - startTime;
+          
+          // Ensure at least 4 seconds of display for user peace of mind
+          if (elapsedTime < 4000) {
+            await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
+          }
 
           if (success) {
             const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
-            setMessage({ text: template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح', type: 'success' });
+            setMessage({ 
+              text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح') + ' (تم الحفظ في النظام)', 
+              type: 'success' 
+            });
           } else {
-            setMessage({ text: 'تنبيه: فشل المزامنة مع السيرفر. تم الحفظ في جهازك فقط، يرجى إبقاء هذه الصفحة مفتوحة لضمان المزامنة التلقائية.', type: 'security' });
+            setMessage({ 
+              text: 'تم تأمين البصمة على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.', 
+              type: 'success' 
+            });
           }
         }
       } else {
@@ -369,13 +348,27 @@ const AttendancePublic: React.FC = () => {
           };
 
           setMessage({ text: 'جاري تأمين بصمة الخروج في النظام، يرجى الانتظار...', type: 'success' });
+          
+          const startTime = Date.now();
           const success = await updateAttendance(updatedRecord);
+          const elapsedTime = Date.now() - startTime;
+
+          // Minimum 4 seconds overlay
+          if (elapsedTime < 4000) {
+            await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
+          }
 
           if (success) {
             const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
-            setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
+            setMessage({ 
+              text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح') + ' (تم الحفظ في النظام)', 
+              type: 'success' 
+            });
           } else {
-            setMessage({ text: 'فشل الاتصال بالنظام المركزي. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.', type: 'security' });
+            setMessage({ 
+              text: 'تم تأمين انصرافك على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.', 
+              type: 'success' 
+            });
           }
         }
       }
@@ -397,6 +390,23 @@ const AttendancePublic: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4 md:p-8 font-cairo text-right relative overflow-hidden" dir="rtl">
+      {/* Loading Overlay */}
+      {isSubmitting && (
+        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-[4px] flex flex-col items-center justify-center p-6 text-center">
+          <div className="bg-white p-10 rounded-[3rem] shadow-2xl space-y-6 max-w-sm w-full animate-in zoom-in-95 duration-300">
+            <div className="relative mx-auto w-20 h-20">
+              <div className="absolute inset-0 border-4 border-indigo-100 rounded-full"></div>
+              <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
+              <Save className="absolute inset-0 m-auto w-8 h-8 text-indigo-600 animate-pulse" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-black text-slate-900">جاري تسجيل البصمة...</h3>
+              <p className="text-sm text-slate-500 font-bold leading-relaxed">يرجى الانتظار والاتصال بالإنترنت، <span className="text-rose-600">لا تغلق الصفحة الآن</span> لضمان وصول بياناتك.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Decorative Background Elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-600/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1s' }}></div>
@@ -438,19 +448,22 @@ const AttendancePublic: React.FC = () => {
         </div>
 
         {/* Status Badges Overlay */}
-        <div className="flex justify-center gap-3 -mt-3 relative z-20">
-          {isTimeSynced && (
-            <div className="px-3 py-1 bg-emerald-50/80 backdrop-blur-sm border border-emerald-100/50 rounded-full shadow-sm flex items-center gap-1.5">
-              <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
-              <span className="text-[9px] font-black text-emerald-700 uppercase">GMT+3 Synced</span>
+        <div className="flex flex-col items-center gap-3 -mt-3 relative z-20">
+          <div className="flex justify-center gap-3">
+            {isTimeSynced && (
+              <div className="px-3 py-1 bg-emerald-50/80 backdrop-blur-sm border border-emerald-100/50 rounded-full shadow-sm flex items-center gap-1.5">
+                <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span className="text-[9px] font-black text-emerald-700 uppercase">GMT+3 Synced</span>
+              </div>
+            )}
+            <div className={`px-3 py-1 backdrop-blur-sm border rounded-full shadow-sm flex items-center gap-1.5 ${locationStatus === 'active' ? 'bg-indigo-50/80 border-indigo-100/50 text-indigo-700' :
+              'bg-rose-50/80 border-rose-100/50 text-rose-700'
+              }`}>
+              <Navigation className="w-3 h-3" />
+              <span className="text-[9px] font-black uppercase">{locationStatus === 'active' ? 'GPS Active' : 'GPS Inactive'}</span>
             </div>
-          )}
-          <div className={`px-3 py-1 backdrop-blur-sm border rounded-full shadow-sm flex items-center gap-1.5 ${locationStatus === 'active' ? 'bg-indigo-50/80 border-indigo-100/50 text-indigo-700' :
-            'bg-rose-50/80 border-rose-100/50 text-rose-700'
-            }`}>
-            <Navigation className="w-3 h-3" />
-            <span className="text-[9px] font-black uppercase">{locationStatus === 'active' ? 'GPS Active' : 'GPS Inactive'}</span>
           </div>
+
         </div>
 
         {/* Main Content Card */}
