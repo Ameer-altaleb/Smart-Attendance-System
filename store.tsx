@@ -181,32 +181,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setter((prev: any[]) => {
             const existingMap = new Map(prev.map(item => [item.id, item]));
             
-            // For tables where we fetch a specific window (like attendance),
-            // we need to identify records that might have been deleted on the server.
-            if (tableName === 'attendance') {
-              const cutoffDate = new Date(Date.now() + timeOffset);
-              cutoffDate.setDate(cutoffDate.getDate() - 90);
-              const cutoffStr = cutoffDate.toISOString().split('T')[0];
-              
-              const serverIds = new Set(data.map((item: any) => item.id));
-              
-              // Remove records that are:
-              // 1. Within the fetch window (>= cutoffDate)
-              // 2. Not in the server response
-              // 3. Are marked as 'synced' (meaning they aren't local-only/unsynced changes)
-              prev.forEach(item => {
-                if (item.date >= cutoffStr && !serverIds.has(item.id) && item.syncStatus === 'synced') {
-                  existingMap.delete(item.id);
-                }
-              });
-            }
-
+            // Step 1: Add or Update records from server
             data.forEach((newItem: any) => {
               const existing = existingMap.get(newItem.id);
+              
+              // Update if:
+              // 1. It's a new record from the server
+              // 2. The existing record is already synced (safe to refresh)
+              // 3. The existing record has NO sync status (legacy)
               if (!existing || existing.syncStatus === 'synced' || !existing.syncStatus) {
                 existingMap.set(newItem.id, { ...newItem, syncStatus: 'synced' });
               }
             });
+
+            // Note: We no longer delete local records that are missing from 'data'.
+            // This prevents data loss due to pagination, RLS, or partial server responses.
+            // Records should only be removed via explicit 'DELETE' events from Realtime.
+            
             return Array.from(existingMap.values());
           });
         } else {
@@ -338,18 +329,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }
 
-      // Safe cleanup: Only remove the records that were successfully synced this time
       if (successfullySyncedIds.length > 0) {
-        const currentLocal = JSON.parse(localStorage.getItem('attendance') || '[]');
-        const updatedLocal = currentLocal.filter((r: any) => !successfullySyncedIds.includes(r.id));
-        
-        if (updatedLocal.length === 0) {
-          localStorage.removeItem('attendance');
-        } else {
-          localStorage.setItem('attendance', JSON.stringify(updatedLocal));
-        }
-        
-        console.log(`[Recovery] Successfully synced ${successfullySyncedIds.length} records. Cleanup complete.`);
+        console.log(`[Recovery] Successfully synced ${successfullySyncedIds.length} records. Unified state will now handle the persistent storage.`);
       }
     } catch (err) {
       console.error('[Recovery] Failed to recover attendance:', err);
