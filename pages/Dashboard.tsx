@@ -161,26 +161,37 @@ const Dashboard: React.FC = () => {
 
   // Daily Summary (List of all employees and their movements for today)
   const dailySummary = useMemo(() => {
-    const summary: { employee: any; record?: any }[] = [];
+    const summary: { employee: any; record?: any; latestTime?: number }[] = [];
     
-    [...activeEmployees]
-      .sort((a, b) => a.name.localeCompare(b.name, 'ar'))
-      .forEach(emp => {
-        const empRecords = todayRecords
-          .filter(r => r.employeeId === emp.id)
-          .sort((a, b) => new Date(a.checkIn!).getTime() - new Date(b.checkIn!).getTime());
-          
-        if (empRecords.length === 0) {
-          summary.push({ employee: emp });
-        } else {
-          empRecords.forEach(rec => {
-            summary.push({ employee: emp, record: rec });
-          });
-        }
-      });
-      
-    return summary;
+    activeEmployees.forEach(emp => {
+      const empRecords = todayRecords
+        .filter(r => r.employeeId === emp.id)
+        .sort((a, b) => new Date(a.checkIn!).getTime() - new Date(b.checkIn!).getTime());
+        
+      if (empRecords.length === 0) {
+        summary.push({ employee: emp, latestTime: 0 }); // No activity = bottom
+      } else {
+        empRecords.forEach(rec => {
+          const time = new Date(rec.checkOut || rec.checkIn!).getTime();
+          summary.push({ employee: emp, record: rec, latestTime: time });
+        });
+      }
+    });
+
+    // Sort: Latest activity first, then by name for those with same activity status
+    return summary.sort((a, b) => {
+      if ((b.latestTime || 0) !== (a.latestTime || 0)) {
+        return (b.latestTime || 0) - (a.latestTime || 0);
+      }
+      return a.employee.name.localeCompare(b.employee.name, 'ar');
+    });
   }, [activeEmployees, todayRecords]);
+
+  // Registered employees count for the header
+  const registeredCount = useMemo(() => {
+    const uniqueIds = new Set(todayRecords.map(r => r.employeeId));
+    return uniqueIds.size;
+  }, [todayRecords]);
 
   // Center statistics for progress bars
   const centerStats = useMemo(() =>
@@ -329,8 +340,11 @@ const Dashboard: React.FC = () => {
         <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col h-[500px]">
           <div className="flex items-center justify-between mb-8 shrink-0">
             <h3 className="text-xl font-black text-slate-900 tracking-tight">سجل حركات اليوم</h3>
-            <div className="px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg text-[9px] font-black text-slate-400 uppercase tracking-widest">
-              {dailySummary.length} موظف
+            <div className="flex items-center gap-2">
+              <div className="px-3 py-1 bg-emerald-50 border border-emerald-100 rounded-lg text-[9px] font-black text-emerald-600 uppercase tracking-widest">
+                {registeredCount} / {activeEmployees.length} مسجل
+              </div>
+              <Activity className="w-4 h-4 text-slate-300" />
             </div>
           </div>
           <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar flex-1">
