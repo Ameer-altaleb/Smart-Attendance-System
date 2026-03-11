@@ -35,8 +35,16 @@ export function calculateWorkingHours(checkIn: Date, checkOut: Date): number {
   return Math.max(0, Number(hours.toFixed(2)));
 }
 
-export function getTodayDateString(): string {
-  return format(new Date(), 'yyyy-MM-dd');
+/**
+ * Returns a Date object adjusted to Syria/Turkey timezone (GMT+3)
+ */
+export function getSyriaDate(date: Date = new Date()): Date {
+  const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+  return new Date(utc + (3600000 * 3));
+}
+
+export function getTodayDateString(date: Date = getSyriaDate()): string {
+  return format(date, 'yyyy-MM-dd');
 }
 
 export function normalizeArabic(text: string): string {
@@ -63,4 +71,17 @@ export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c; // المسافة بالأمتار
+}
+
+/**
+ * توليد كود تأكيد رقمي فريد للبصمة
+ */
+export function generateReceiptCode(employeeId: string, timestamp: string): string {
+  const shortId = employeeId.substring(0, 4).toUpperCase();
+  const timeHash = Math.abs(timestamp.split('').reduce((a, b) => {
+    a = ((a << 5) - a) + b.charCodeAt(0);
+    return a & a;
+  }, 0)).toString(36).substring(0, 4).toUpperCase();
+  
+  return `RX-${shortId}-${timeHash}`;
 }
