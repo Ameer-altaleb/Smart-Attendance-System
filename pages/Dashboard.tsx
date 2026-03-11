@@ -12,7 +12,7 @@ import {
 } from 'recharts';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
-import { getTodayDateString } from '../utils/attendanceLogic.ts';
+import { getTodayDateString, getSyriaDate } from '../utils/attendanceLogic.ts';
 
 // Memoized Stat Card
 const StatCard = memo(({ stat, index }: { stat: any; index: number }) => (
@@ -86,7 +86,7 @@ CenterProgress.displayName = 'CenterProgress';
 
 const Dashboard: React.FC = () => {
   const { employees, centers, attendance, pendingOperations, requestDataRecovery, currentTime } = useApp();
-  const today = format(currentTime, 'yyyy-MM-dd');
+  const today = getTodayDateString(getSyriaDate(currentTime));
 
   const handleForceSync = async () => {
     if (window.confirm('سيتم إرسال أمر برفع جميع البيانات المعلقة من هواتف الموظفين الآن. هل تريد المتابعة؟')) {
@@ -145,10 +145,9 @@ const Dashboard: React.FC = () => {
     ];
   }, [todayRecords, activeEmployees]);
 
-  // Weekly activity chart data
   const weeklyData = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
-      const d = new Date();
+      const d = getSyriaDate();
       d.setDate(d.getDate() - (6 - i));
       const date = format(d, 'yyyy-MM-dd');
       const count = attendance.filter(a => a.date === date && activeCenterIds.has(a.centerId)).length;

@@ -7,7 +7,7 @@ import {
   LogIn, LogOut, CheckCircle2, ShieldAlert, Smartphone,
   BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown, Save, RefreshCw
 } from 'lucide-react';
-import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance } from '../utils/attendanceLogic.ts';
+import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance, getSyriaDate } from '../utils/attendanceLogic.ts';
 import { AttendanceRecord, Employee, Notification, Center } from '../types.ts';
 import { supabase } from '../lib/supabase.ts';
 import { APP_VERSION } from '../constants.tsx';
@@ -236,7 +236,7 @@ const AttendancePublic: React.FC = () => {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      const today = format(currentSyncedTime, 'yyyy-MM-dd');
+      const today = getTodayDateString(getSyriaDate(new Date(Date.now() + timeOffset)));
 
       // العثور على أحدث سجل للموظف
       const recentRecord = [...attendance]
@@ -300,29 +300,15 @@ const AttendancePublic: React.FC = () => {
             latitude: userLocation?.lat,
             longitude: userLocation?.lon
           };
-          setMessage({ text: 'جاري تأمين البصمة في النظام، يرجى الانتظار...', type: 'success' });
+          setMessage({ text: 'جاري تأمين البصمة في جهازك...', type: 'success' });
           
-          const startTime = Date.now();
-          const success = await addAttendance(record);
-          const elapsedTime = Date.now() - startTime;
+          await addAttendance(record);
           
-          // Ensure at least 4 seconds of display for user peace of mind
-          if (elapsedTime < 4000) {
-            await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
-          }
-
-          if (success) {
-            const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
-            setMessage({ 
-              text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح') + ' (تم الحفظ في النظام)', 
-              type: 'success' 
-            });
-          } else {
-            setMessage({ 
-              text: 'تم تأمين البصمة على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.', 
-              type: 'success' 
-            });
-          }
+          const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
+          setMessage({ 
+            text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تأمين البصمة بنجاح في جهازك') + ' وسيتم الرفع للسيرفر تلقائياً.', 
+            type: 'success' 
+          });
         }
       } else {
         if (!hasOpenRecord) {
@@ -347,29 +333,15 @@ const AttendancePublic: React.FC = () => {
             longitude: userLocation?.lon
           };
 
-          setMessage({ text: 'جاري تأمين بصمة الخروج في النظام، يرجى الانتظار...', type: 'success' });
+          setMessage({ text: 'جاري تأمين الانصراف في جهازك...', type: 'success' });
           
-          const startTime = Date.now();
-          const success = await updateAttendance(updatedRecord);
-          const elapsedTime = Date.now() - startTime;
+          await updateAttendance(updatedRecord);
 
-          // Minimum 4 seconds overlay
-          if (elapsedTime < 4000) {
-            await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
-          }
-
-          if (success) {
-            const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
-            setMessage({ 
-              text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح') + ' (تم الحفظ في النظام)', 
-              type: 'success' 
-            });
-          } else {
-            setMessage({ 
-              text: 'تم تأمين انصرافك على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.', 
-              type: 'success' 
-            });
-          }
+          const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
+          setMessage({ 
+            text: (template?.content.replace('{minutes}', early.toString()) || 'تم تأمين الانصراف بنجاح') + ' وسيتم الرفع للسيرفر تلقائياً.', 
+            type: 'success' 
+          });
         }
       }
       // Removed immediate refreshData('attendance') to prevent race condition
@@ -400,8 +372,8 @@ const AttendancePublic: React.FC = () => {
               <Save className="absolute inset-0 m-auto w-8 h-8 text-indigo-600 animate-pulse" />
             </div>
             <div className="space-y-2">
-              <h3 className="text-xl font-black text-slate-900">جاري تسجيل البصمة...</h3>
-              <p className="text-sm text-slate-500 font-bold leading-relaxed">يرجى الانتظار والاتصال بالإنترنت، <span className="text-rose-600">لا تغلق الصفحة الآن</span> لضمان وصول بياناتك.</p>
+              <h3 className="text-xl font-black text-slate-900">جاري تأمين البصمة...</h3>
+              <p className="text-sm text-slate-500 font-bold leading-relaxed">يتم الآن الحفظ في "السجل الدائم" للجهاز. <span className="text-emerald-600">بياناتك آمنة</span> وسيتم رفعها للسيرفر فور توفر الإنترنت.</p>
             </div>
           </div>
         </div>
