@@ -33,25 +33,25 @@ StatCard.displayName = 'StatCard';
 
 // Memoized Daily Summary Item
 const DailySummaryItem = memo(({ index, employee, record }: { index: number; employee: any; record?: any }) => (
-  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-white hover:shadow-md transition-all group">
-    <div className="flex items-center gap-4 flex-1">
-      <span className="text-[10px] font-black text-slate-400 w-5">{index}.</span>
-      <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center font-black text-[10px] group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+  <div className="flex items-center justify-between p-3 md:p-4 bg-slate-50 rounded-xl md:rounded-2xl border border-slate-100 hover:bg-white hover:shadow-md transition-all group">
+    <div className="flex items-center gap-2 md:gap-4 flex-1 min-w-0">
+      <span className="text-[9px] md:text-[10px] font-black text-slate-400 w-4 md:w-5 shrink-0">{index}.</span>
+      <div className="w-7 h-7 md:w-8 md:h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center font-black text-[9px] md:text-[10px] group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0">
         {employee?.name.charAt(0) || 'U'}
       </div>
-      <p className="text-xs font-black text-slate-800 truncate">{employee?.name || 'موظف غير معروف'}</p>
+      <p className="text-[11px] md:text-xs font-black text-slate-800 truncate">{employee?.name || 'موظف غير معروف'}</p>
     </div>
     
-    <div className="flex items-center gap-8 text-left">
-      <div className="flex flex-col items-start min-w-[60px]">
-        <span className="text-[8px] font-black text-slate-400 uppercase mb-0.5">دخول</span>
-        <p className="text-xs font-black text-emerald-600">
+    <div className="flex items-center gap-3 md:gap-8 text-left shrink-0">
+      <div className="flex flex-col items-start min-w-[50px] md:min-w-[60px]">
+        <span className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase mb-0.5">دخول</span>
+        <p className="text-[10px] md:text-xs font-black text-emerald-600">
           {record?.checkIn ? format(new Date(record.checkIn), 'HH:mm') : '-'}
         </p>
       </div>
-      <div className="flex flex-col items-start min-w-[60px]">
-        <span className="text-[8px] font-black text-slate-400 uppercase mb-0.5">خروج</span>
-        <p className="text-xs font-black text-indigo-600">
+      <div className="flex flex-col items-start min-w-[50px] md:min-w-[60px]">
+        <span className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase mb-0.5">خروج</span>
+        <p className="text-[10px] md:text-xs font-black text-indigo-600">
           {record?.checkOut ? format(new Date(record.checkOut), 'HH:mm') : '-'}
         </p>
       </div>
@@ -337,17 +337,17 @@ const Dashboard: React.FC = () => {
       {/* Recent Activity & Centers Overview */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
         {/* Recent Logs (Filtered for Active Centers) */}
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col h-[500px]">
-          <div className="flex items-center justify-between mb-8 shrink-0">
-            <h3 className="text-xl font-black text-slate-900 tracking-tight">سجل حركات اليوم</h3>
+        <div className="bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm flex flex-col h-[400px] md:h-[500px]">
+          <div className="flex items-center justify-between mb-6 md:mb-8 shrink-0">
+            <h3 className="text-lg md:text-xl font-black text-slate-900 tracking-tight">سجل حركات اليوم</h3>
             <div className="flex items-center gap-2">
-              <div className="px-3 py-1 bg-emerald-50 border border-emerald-100 rounded-lg text-[9px] font-black text-emerald-600 uppercase tracking-widest">
+              <div className="px-2 py-1 bg-emerald-50 border border-emerald-100 rounded-lg text-[8px] md:text-[9px] font-black text-emerald-600 uppercase tracking-widest whitespace-nowrap">
                 {registeredCount} / {activeEmployees.length} مسجل
               </div>
-              <Activity className="w-4 h-4 text-slate-300" />
+              <Activity className="w-3.5 h-3.5 md:w-4 md:h-4 text-slate-300" />
             </div>
           </div>
-          <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar flex-1">
+          <div className="space-y-2 md:space-y-3 overflow-y-auto pr-1 md:pr-2 custom-scrollbar flex-1">
             {dailySummary.map((item, i) => (
               <DailySummaryItem
                 key={item.record?.id || `no-rec-${item.employee.id}`}
@@ -357,7 +357,7 @@ const Dashboard: React.FC = () => {
               />
             ))}
             {dailySummary.length === 0 && (
-              <div className="py-20 text-center text-slate-300 font-bold italic">لا توجد سجلات للمراكز النشطة اليوم</div>
+              <div className="py-20 text-center text-slate-300 font-bold italic text-sm">لا توجد سجلات للمراكز النشطة اليوم</div>
             )}
           </div>
         </div>
