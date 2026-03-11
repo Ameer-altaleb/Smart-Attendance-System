@@ -170,7 +170,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setter((prev: any[]) => {
             const existingMap = new Map(prev.map(item => [item.id, item]));
             data.forEach((newItem: any) => {
-              existingMap.set(newItem.id, { ...newItem, syncStatus: 'synced' });
+              // Priority: Keep local 'pending' or 'failed' records even if server has data
+              const existing = existingMap.get(newItem.id);
+              if (!existing || existing.syncStatus === 'synced') {
+                existingMap.set(newItem.id, { ...newItem, syncStatus: 'synced' });
+              }
             });
             return Array.from(existingMap.values());
           });
@@ -222,10 +226,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 4. CRUD and Specialized Functions ---
   const retrySync = useCallback(async () => {
-    // Sync pending notifications
+    // 1. Sync pending notifications
     const pendingNotifs = notifications.filter(n => n.syncStatus === 'pending' || n.syncStatus === 'failed');
     for (const n of pendingNotifs) {
-      const { syncStatus, ...dbRecord } = n;
+      const { syncStatus: _s, ...dbRecord } = n;
       executeDbOperation('notifications',
         () => supabase!.from('notifications').insert(dbRecord),
         (success) => {
@@ -235,43 +239,48 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       );
     }
-  }, [notifications, executeDbOperation]);
+
+    // 2. Sync pending attendance records
+    const pendingAttendance = attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed');
+    if (pendingAttendance.length > 0) {
+      console.log(`[Sync] Attempting to retry ${pendingAttendance.length} pending attendance records...`);
+      for (const record of pendingAttendance) {
+        const { syncStatus: _s, ...dbRecord } = record;
+        executeDbOperation('attendance',
+          () => supabase!.from('attendance').upsert(dbRecord),
+          (success) => {
+            setAttendance(prev => prev.map(item =>
+              item.id === record.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item
+            ));
+          }
+        );
+      }
+    }
+  }, [notifications, attendance, executeDbOperation]);
 
   // Deep recovery: scan localStorage for old attendance records and push to DB
   const recoverLocalAttendance = useCallback(async () => {
     if (!checkSupabaseConnection() || !supabase) return;
-    
+
     try {
       const raw = localStorage.getItem('attendance');
       if (!raw) return;
-      
+
       const localRecords: AttendanceRecord[] = JSON.parse(raw);
       if (!Array.isArray(localRecords) || localRecords.length === 0) return;
 
-      console.log(`[Recovery] Found ${localRecords.length} records in localStorage, scanning for unsynced...`);
-
-      // Filter records that are not marked as synced or have no sync status
-      const unsyncedRecords = localRecords.filter(
-        r => !r.syncStatus || r.syncStatus !== 'synced'
-      );
-
-      if (unsyncedRecords.length === 0) {
-        // All records are synced, clean up localStorage
-        localStorage.removeItem('attendance');
-        console.log('[Recovery] All local records already synced. Cleaned up localStorage.');
-        return;
-      }
+      const unsyncedRecords = localRecords.filter(r => !r.syncStatus || r.syncStatus !== 'synced');
+      if (unsyncedRecords.length === 0) return;
 
       console.log(`[Recovery] Found ${unsyncedRecords.length} unsynced records. Pushing to database...`);
-      let successCount = 0;
+      const successfullySyncedIds: string[] = [];
 
       for (const record of unsyncedRecords) {
-        const { syncStatus, ...dbRecord } = record;
+        const { syncStatus: _s, ...dbRecord } = record;
         try {
           const { error } = await supabase.from('attendance').upsert(dbRecord);
           if (!error) {
-            successCount++;
-            // Update local state with the synced record
+            successfullySyncedIds.push(record.id);
             setAttendance(prev => {
               const exists = prev.some(a => a.id === record.id);
               if (exists) {
@@ -280,33 +289,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 return [...prev, { ...record, syncStatus: 'synced' }];
               }
             });
-          } else {
-            console.error(`[Recovery] Failed to sync record ${record.id}:`, error);
           }
         } catch (err) {
           console.error(`[Recovery] Error syncing record ${record.id}:`, err);
         }
       }
 
-      console.log(`[Recovery] Successfully synced ${successCount}/${unsyncedRecords.length} records.`);
-
-      // Clean up localStorage after recovery
-      if (successCount > 0) {
-        // Update localStorage to mark all recovered records as synced
-        const updatedLocal = localRecords.map(r => {
-          const wasSynced = unsyncedRecords.find(u => u.id === r.id);
-          return wasSynced ? { ...r, syncStatus: 'synced' as const } : r;
-        });
-        localStorage.setItem('attendance', JSON.stringify(updatedLocal));
-      }
-
-      // If all records are now synced, remove from localStorage entirely
-      if (successCount === unsyncedRecords.length) {
-        localStorage.removeItem('attendance');
-        console.log('[Recovery] All records synced. Cleaned up localStorage completely.');
+      // Safe cleanup: Only remove the records that were successfully synced this time
+      if (successfullySyncedIds.length > 0) {
+        const currentLocal = JSON.parse(localStorage.getItem('attendance') || '[]');
+        const updatedLocal = currentLocal.filter((r: any) => !successfullySyncedIds.includes(r.id));
+        
+        if (updatedLocal.length === 0) {
+          localStorage.removeItem('attendance');
+        } else {
+          localStorage.setItem('attendance', JSON.stringify(updatedLocal));
+        }
+        
+        console.log(`[Recovery] Successfully synced ${successfullySyncedIds.length} records. Cleanup complete.`);
       }
     } catch (err) {
-      console.error('[Recovery] Failed to parse localStorage attendance:', err);
+      console.error('[Recovery] Failed to recover attendance:', err);
     }
   }, []);
 
@@ -343,43 +346,60 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [executeDbOperation]);
 
   const addAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
+    // 1. Save to Black Box (Archive) first - This is the last resort backup
+    try {
+      const rawArchive = localStorage.getItem('attendance_archive');
+      const archive = rawArchive ? JSON.parse(rawArchive) : [];
+      archive.push({ ...r, syncStatus: 'pending' });
+      // Increase buffer to 500 records for safety during high-concurrency peak hours
+      localStorage.setItem('attendance_archive', JSON.stringify(archive.slice(-500)));
+    } catch (e) {
+      console.error('Failed to save to audit log', e);
+    }
+
+    // 2. Optimistic Update
+    const recordWithStatus = { ...r, syncStatus: 'pending' as const };
+    setAttendance(prev => {
+      if (prev.some(item => item.id === r.id)) return prev;
+      return [...prev, recordWithStatus];
+    });
+
+    // 3. Prepare for DB
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { syncStatus, ...dbRecord } = r;
 
-    // Start DB operation first (direct sync)
+    // 4. Sync and wait for DB result
     const success = await executeDbOperation('attendance',
       () => supabase!.from('attendance').upsert(dbRecord)
     );
 
-    if (success) {
-      setAttendance(prev => {
-        const next = [...prev, { ...r, syncStatus: 'synced' }];
-        return next;
-      });
-      return true;
-    }
-    
-    return false;
+    setAttendance(prev => prev.map(item => 
+      item.id === r.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item
+    ));
+
+    return success;
   }, [executeDbOperation]);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
+    // 1. Optimistic Update
+    setAttendance(prev => prev.map(item => 
+      item.id === r.id ? { ...r, syncStatus: 'pending' as const } : item
+    ));
+
+    // 2. Prepare for DB
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { syncStatus, ...dbRecord } = r;
 
-    // Direct sync to DB
+    // 4. Sync and wait for DB result
     const success = await executeDbOperation('attendance',
       () => supabase!.from('attendance').upsert(dbRecord)
     );
 
-    if (success) {
-      setAttendance(prev => {
-        const next = prev.map(item => item.id === r.id ? { ...r, syncStatus: 'synced' } : item);
-        return next;
-      });
-      return true;
-    }
-    
-    return false;
+    setAttendance(prev => prev.map(item => 
+      item.id === r.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item
+    ));
+
+    return success;
   }, [executeDbOperation]);
 
   const addNotification = useCallback(async (n: Notification) => {
@@ -495,7 +515,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     init();
-    const interval = setInterval(() => { if (navigator.onLine) { retrySync(); recoverLocalAttendance(); } }, 300000);
+    const interval = setInterval(() => { 
+      if (navigator.onLine) { 
+        retrySync(); 
+        recoverLocalAttendance(); 
+      } 
+    }, 60000); // Increased frequency to 1 minute
     return () => clearInterval(interval);
   }, [refreshData, retrySync]);
 
