@@ -25,7 +25,7 @@ const AttendancePublic: React.FC = () => {
   const { 
     centers, employees, attendance, addAttendance, updateAttendance, 
     updateEmployee, templates, notifications, settings, refreshData,
-    currentTime, timeOffset, isTimeSynced
+    currentTime, timeOffset, isTimeSynced, pendingOperations
   } = useApp();
   
   const [selectedCenterId, setSelectedCenterId] = useState(() => localStorage.getItem('last_center_id') || '');
@@ -47,7 +47,7 @@ const AttendancePublic: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeNotification, setActiveNotification] = useState<Notification | null>(null);
   const [ipLoading, setIpLoading] = useState(true);
-  const [isAttendanceLoading, setIsAttendanceLoading] = useState(true);
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
 
   // Robust Network Time Sync Logic targeting Syria/Turkey Time
@@ -416,6 +416,12 @@ const AttendancePublic: React.FC = () => {
             <p className="text-[10px] md:text-xs font-bold text-slate-400">
               {format(currentTime, 'EEEE، dd MMMM', { locale: ar })}
             </p>
+            {pendingOperations > 0 && (
+              <div className="mt-1 flex items-center gap-1.5 px-2 py-0.5 bg-amber-50 rounded-full border border-amber-100 animate-pulse">
+                <Loader2 className="w-2.5 h-2.5 text-amber-500 animate-spin" />
+                <span className="text-[8px] font-black text-amber-600 uppercase">Synchronizing</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -627,17 +633,7 @@ const AttendancePublic: React.FC = () => {
                       </div>
                     )}
 
-                    {isAttendanceLoading && !todayRecord && (
-                      <div className="p-5 bg-indigo-50/50 border border-indigo-100 rounded-2xl flex items-center gap-4 animate-pulse">
-                        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-                          <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm font-black text-indigo-800">جاري الاتصال بالنظام المركزي...</p>
-                          <p className="text-[10px] font-bold text-indigo-500">يتم استرجاع سجلاتك من قاعدة البيانات</p>
-                        </div>
-                      </div>
-                    )}
+                    {/* Simplified Loading Logic removed for Local-First UX */}
 
                     {!isAttendanceLoading && !todayRecord && (
                       <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-center gap-3">
