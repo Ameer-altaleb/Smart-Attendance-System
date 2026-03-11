@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import {
   LogIn, LogOut, CheckCircle2, ShieldAlert, Smartphone,
-  BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown
+  BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown, Save, RefreshCw
 } from 'lucide-react';
 import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance } from '../utils/attendanceLogic.ts';
 import { AttendanceRecord, Employee, Notification, Center } from '../types.ts';
@@ -136,8 +136,19 @@ const AttendancePublic: React.FC = () => {
     fetchIP();
 
     const syncInterval = setInterval(syncWithNetworkTime, 300000);
-    return () => clearInterval(syncInterval);
-  }, []);
+    
+    // Immediate sync when coming back online
+    const handleOnline = () => {
+      console.log('Device back online, triggering immediate sync...');
+      refreshData();
+    };
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [refreshData]);
 
   useEffect(() => {
     // Trigger a full data refresh from the database
@@ -176,8 +187,11 @@ const AttendancePublic: React.FC = () => {
 
   const selectedCenter = useMemo(() => centers.find(c => c.id === selectedCenterId), [centers, selectedCenterId]);
 
-  // تم تعطيل التحقق الإجباري من الـ IP مؤقتاً بناءً على طلب المدير
-  const isIpAuthorized = true; // تم ضبطها لـ true لتجاوز الحجب
+  // تم تفعيل التحقق الإلزامي من الـ IP لضمان الأمان
+  const isIpAuthorized = useMemo(() => {
+    if (!selectedCenter || !selectedCenter.authorizedIP) return true;
+    return userIP === selectedCenter.authorizedIP;
+  }, [selectedCenter, userIP]);
 
   useEffect(() => {
     if (selectedEmployeeId) {
@@ -335,14 +349,28 @@ const AttendancePublic: React.FC = () => {
             latitude: userLocation?.lat,
             longitude: userLocation?.lon
           };
-          setMessage({ text: 'جاري تأمین البصمة في النظام، يرجى الانتظار...', type: 'success' });
+          setMessage({ text: 'جاري تأمين البصمة في النظام، يرجى الانتظار...', type: 'success' });
+          
+          const startTime = Date.now();
           const success = await addAttendance(record);
+          const elapsedTime = Date.now() - startTime;
+          
+          // Ensure at least 4 seconds of display for user peace of mind
+          if (elapsedTime < 4000) {
+            await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
+          }
 
           if (success) {
             const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
-            setMessage({ text: template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح', type: 'success' });
+            setMessage({ 
+              text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح') + ' (تم الحفظ في النظام)', 
+              type: 'success' 
+            });
           } else {
-            setMessage({ text: 'تنبيه: فشل المزامنة مع السيرفر. تم الحفظ في جهازك فقط، يرجى إبقاء هذه الصفحة مفتوحة لضمان المزامنة التلقائية.', type: 'security' });
+            setMessage({ 
+              text: 'تم تأمين البصمة على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.', 
+              type: 'success' 
+            });
           }
         }
       } else {
@@ -369,13 +397,27 @@ const AttendancePublic: React.FC = () => {
           };
 
           setMessage({ text: 'جاري تأمين بصمة الخروج في النظام، يرجى الانتظار...', type: 'success' });
+          
+          const startTime = Date.now();
           const success = await updateAttendance(updatedRecord);
+          const elapsedTime = Date.now() - startTime;
+
+          // Minimum 4 seconds overlay
+          if (elapsedTime < 4000) {
+            await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
+          }
 
           if (success) {
             const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
-            setMessage({ text: template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح', type: 'success' });
+            setMessage({ 
+              text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح') + ' (تم الحفظ في النظام)', 
+              type: 'success' 
+            });
           } else {
-            setMessage({ text: 'فشل الاتصال بالنظام المركزي. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.', type: 'security' });
+            setMessage({ 
+              text: 'تم تأمين انصرافك على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.', 
+              type: 'success' 
+            });
           }
         }
       }
@@ -397,6 +439,23 @@ const AttendancePublic: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4 md:p-8 font-cairo text-right relative overflow-hidden" dir="rtl">
+      {/* Loading Overlay */}
+      {isSubmitting && (
+        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-[4px] flex flex-col items-center justify-center p-6 text-center">
+          <div className="bg-white p-10 rounded-[3rem] shadow-2xl space-y-6 max-w-sm w-full animate-in zoom-in-95 duration-300">
+            <div className="relative mx-auto w-20 h-20">
+              <div className="absolute inset-0 border-4 border-indigo-100 rounded-full"></div>
+              <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
+              <Save className="absolute inset-0 m-auto w-8 h-8 text-indigo-600 animate-pulse" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-black text-slate-900">جاري تسجيل البصمة...</h3>
+              <p className="text-sm text-slate-500 font-bold leading-relaxed">يرجى الانتظار والاتصال بالإنترنت، <span className="text-rose-600">لا تغلق الصفحة الآن</span> لضمان وصول بياناتك.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Decorative Background Elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-600/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1s' }}></div>
@@ -438,19 +497,22 @@ const AttendancePublic: React.FC = () => {
         </div>
 
         {/* Status Badges Overlay */}
-        <div className="flex justify-center gap-3 -mt-3 relative z-20">
-          {isTimeSynced && (
-            <div className="px-3 py-1 bg-emerald-50/80 backdrop-blur-sm border border-emerald-100/50 rounded-full shadow-sm flex items-center gap-1.5">
-              <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
-              <span className="text-[9px] font-black text-emerald-700 uppercase">GMT+3 Synced</span>
+        <div className="flex flex-col items-center gap-3 -mt-3 relative z-20">
+          <div className="flex justify-center gap-3">
+            {isTimeSynced && (
+              <div className="px-3 py-1 bg-emerald-50/80 backdrop-blur-sm border border-emerald-100/50 rounded-full shadow-sm flex items-center gap-1.5">
+                <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span className="text-[9px] font-black text-emerald-700 uppercase">GMT+3 Synced</span>
+              </div>
+            )}
+            <div className={`px-3 py-1 backdrop-blur-sm border rounded-full shadow-sm flex items-center gap-1.5 ${locationStatus === 'active' ? 'bg-indigo-50/80 border-indigo-100/50 text-indigo-700' :
+              'bg-rose-50/80 border-rose-100/50 text-rose-700'
+              }`}>
+              <Navigation className="w-3 h-3" />
+              <span className="text-[9px] font-black uppercase">{locationStatus === 'active' ? 'GPS Active' : 'GPS Inactive'}</span>
             </div>
-          )}
-          <div className={`px-3 py-1 backdrop-blur-sm border rounded-full shadow-sm flex items-center gap-1.5 ${locationStatus === 'active' ? 'bg-indigo-50/80 border-indigo-100/50 text-indigo-700' :
-            'bg-rose-50/80 border-rose-100/50 text-rose-700'
-            }`}>
-            <Navigation className="w-3 h-3" />
-            <span className="text-[9px] font-black uppercase">{locationStatus === 'active' ? 'GPS Active' : 'GPS Inactive'}</span>
           </div>
+
         </div>
 
         {/* Main Content Card */}
@@ -682,64 +744,39 @@ const AttendancePublic: React.FC = () => {
                 );
               })()}
 
-              {matchedCenter && (() => {
-                const todayStr = format(currentTime, 'yyyy-MM-dd');
-                let todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
-                const localEmployee = employees.find(e => e.id === selectedEmployeeId);
-                const isShiftWorker = localEmployee?.workType === 'shifts';
-                if (isShiftWorker) {
-                  const recentRecord = [...attendance]
-                    .filter(a => a.employeeId === selectedEmployeeId)
-                    .sort((a, b) => new Date(b.checkIn!).getTime() - new Date(a.checkIn!).getTime())[0];
-                  if (recentRecord && !recentRecord.checkOut) todayRecord = recentRecord;
-                }
+              {matchedCenter && (
+                <div className="flex flex-col md:flex-row gap-5 md:gap-6 pt-4 animate-in fade-in slide-in-from-top-4 duration-700 delay-500">
+                  <button
+                    onClick={() => handleAction('in')}
+                    disabled={!selectedEmployeeId || isSubmitting}
+                    className="flex-1 group relative overflow-hidden rounded-[2.2rem] transition-all active:scale-[0.98] disabled:opacity-30"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 group-hover:from-emerald-600 group-hover:to-emerald-800 transition-all"></div>
+                    <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-emerald-200">
+                      {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogIn className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
+                      <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
+                        {isSubmitting ? 'جاري تأمين البصمة...' : 'تسجيل حضور العمل'}
+                      </span>
+                      <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
+                    </div>
+                  </button>
 
-                const hasCheckedIn = !!todayRecord?.checkIn;
-                const hasCheckedOut = !!todayRecord?.checkOut;
-                const showCheckIn = !hasCheckedIn || (isShiftWorker && hasCheckedOut);
-                const showCheckOut = hasCheckedIn && !hasCheckedOut;
-
-                // Don't show buttons if day is complete (checked in and out) for admin staff
-                if (hasCheckedIn && hasCheckedOut && !isShiftWorker) return null;
-
-                return (
-                  <div className="flex flex-col md:flex-row gap-5 md:gap-6 pt-4 animate-in fade-in slide-in-from-top-4 duration-700 delay-500">
-                    {showCheckIn && (
-                      <button
-                        onClick={() => handleAction('in')}
-                        disabled={!selectedEmployeeId || isSubmitting}
-                        className="flex-1 group relative overflow-hidden rounded-[2.2rem] transition-all active:scale-[0.98] disabled:opacity-30"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 group-hover:from-emerald-600 group-hover:to-emerald-800 transition-all"></div>
-                        <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-emerald-200">
-                          {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogIn className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
-                          <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
-                            {isSubmitting ? 'جاري تأمين البصمة...' : 'تسجيل حضور العمل'}
-                          </span>
-                          <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
-                        </div>
-                      </button>
-                    )}
-
-                    {showCheckOut && (
-                      <button
-                        onClick={() => setShowCheckoutConfirm(true)}
-                        disabled={!selectedEmployeeId || isSubmitting}
-                        className="flex-1 group relative overflow-hidden rounded-[2.2rem] transition-all active:scale-[0.98] disabled:opacity-30"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-indigo-700 group-hover:from-indigo-600 group-hover:to-indigo-800 transition-all"></div>
-                        <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-indigo-200">
-                          {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogOut className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
-                          <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
-                            {isSubmitting ? 'جاري تأمين الانصراف...' : 'تسجيل انصراف العمل'}
-                          </span>
-                          <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
-                        </div>
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
+                  <button
+                    onClick={() => setShowCheckoutConfirm(true)}
+                    disabled={!selectedEmployeeId || isSubmitting}
+                    className="flex-1 group relative overflow-hidden rounded-[2.2rem] transition-all active:scale-[0.98] disabled:opacity-30"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-indigo-700 group-hover:from-indigo-600 group-hover:to-indigo-800 transition-all"></div>
+                    <div className="relative px-8 py-6 md:py-9 flex flex-col items-center gap-3 text-white shadow-xl shadow-indigo-200">
+                      {isSubmitting ? <Loader2 className="w-8 h-8 md:w-10 md:h-10 animate-spin" /> : <LogOut className="w-8 h-8 md:w-10 md:h-10 mb-1" />}
+                      <span className="text-xs md:text-sm uppercase tracking-[0.2em] font-black">
+                        {isSubmitting ? 'جاري تأمين الانصراف...' : 'تسجيل انصراف العمل'}
+                      </span>
+                      <div className="w-8 h-1 bg-white/30 rounded-full group-hover:w-16 transition-all duration-500"></div>
+                    </div>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

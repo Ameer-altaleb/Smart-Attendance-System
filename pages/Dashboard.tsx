@@ -4,7 +4,7 @@ import {
   Users, Building2, Clock, CheckCircle,
   AlertCircle, TrendingUp, ArrowUpRight,
   ShieldCheck, Zap, UserCheck, UserMinus,
-  Activity, Map as MapIcon, CalendarDays, Loader2
+  Activity, Map as MapIcon, CalendarDays, Loader2, WifiOff, RefreshCcw
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -80,8 +80,15 @@ const CenterProgress = memo(({ center, percentage, records, totalEmps }: {
 CenterProgress.displayName = 'CenterProgress';
 
 const Dashboard: React.FC = () => {
-  const { employees, centers, attendance, pendingOperations } = useApp();
+  const { employees, centers, attendance, pendingOperations, requestDataRecovery } = useApp();
   const today = getTodayDateString();
+
+  const handleForceSync = async () => {
+    if (window.confirm('سيتم إرسال أمر برفع جميع البيانات المعلقة من هواتف الموظفين الآن. هل تريد المتابعة؟')) {
+      await requestDataRecovery();
+      alert('تم إرسال نداء المزامنة لجميع الأجهزة النشطة.');
+    }
+  };
 
   // Create lookup maps for O(1) access
   const employeeMap = useMemo(() => {
@@ -173,29 +180,47 @@ const Dashboard: React.FC = () => {
   return (
     <div className="space-y-8 animate-in fade-in duration-1000">
       {/* Header Welcome */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-        <div className="flex items-center gap-6">
-          <div className="w-16 h-16 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl shadow-indigo-200">
-            <Zap className="w-8 h-8 fill-current" />
-          </div>
-          <div>
-            <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight">مرحباً بك في لوحة التحكم الذكية</h2>
-              {pendingOperations > 0 && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-100 rounded-full">
-                  <Loader2 className="w-3 h-3 text-amber-600 animate-spin" />
-                  <span className="text-[9px] font-black text-amber-600 uppercase">{pendingOperations} معلق</span>
-                </div>
-              )}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-6">
+            <div className="w-16 h-16 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl shadow-indigo-200">
+              <Zap className="w-8 h-8 fill-current" />
             </div>
-            <p className="text-slate-500 font-bold text-sm">نظرة عامة على حالة الانضباط (للمراكز النشطة فقط)</p>
+            <div>
+              <div className="flex items-center gap-3">
+                <h2 className="text-2xl font-black text-slate-900 tracking-tight">مرحباً بك في لوحة التحكم الذكية</h2>
+                {pendingOperations > 0 && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-100 rounded-full">
+                    <Loader2 className="w-3 h-3 text-amber-600 animate-spin" />
+                    <span className="text-[9px] font-black text-amber-600 uppercase">{pendingOperations} معلق</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-slate-500 font-bold text-sm">نظرة عامة على حالة الانضباط (للمراكز النشطة فقط)</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={handleForceSync}
+              className="flex items-center gap-2 bg-indigo-50 text-indigo-600 px-4 py-3 rounded-2xl border border-indigo-100 font-black text-[10px] hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95"
+              title="طلب مزامنة فورية من جميع هواتف الموظفين"
+            >
+              <RefreshCcw className="w-4 h-4" />
+              <span>نداء المزامنة الشامل</span>
+            </button>
+            {attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed').length > 0 && (
+              <div className="flex items-center gap-2 bg-rose-50 px-4 py-2 rounded-xl border border-rose-100 border-dashed animate-pulse">
+                <WifiOff className="w-4 h-4 text-rose-500" />
+                <span className="text-[10px] font-black text-rose-600 uppercase">
+                  {attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed').length} سجلات غير مزامنة
+                </span>
+              </div>
+            )}
+            <div className="flex items-center gap-3 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100">
+              <CalendarDays className="w-5 h-5 text-indigo-600" />
+              <span className="text-slate-700 font-black text-xs">{format(new Date(), 'dd MMMM yyyy', { locale: ar })}</span>
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-3 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100">
-          <CalendarDays className="w-5 h-5 text-indigo-600" />
-          <span className="text-slate-700 font-black text-xs">{format(new Date(), 'dd MMMM yyyy', { locale: ar })}</span>
-        </div>
-      </div>
 
       {/* Primary Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
