@@ -22,7 +22,12 @@ const getDeviceId = () => {
 };
 
 const AttendancePublic: React.FC = () => {
-  const { centers, employees, attendance, addAttendance, updateAttendance, updateEmployee, templates, notifications, settings, refreshData } = useApp();
+  const { 
+    centers, employees, attendance, addAttendance, updateAttendance, 
+    updateEmployee, templates, notifications, settings, refreshData,
+    currentTime, timeOffset, isTimeSynced
+  } = useApp();
+  
   const [selectedCenterId, setSelectedCenterId] = useState(() => localStorage.getItem('last_center_id') || '');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => localStorage.getItem('last_emp_id') || '');
 
@@ -34,12 +39,6 @@ const AttendancePublic: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('last_emp_id', selectedEmployeeId);
   }, [selectedEmployeeId]);
-
-  // Time & Location State
-  const [timeOffset, setTimeOffset] = useState(0);
-  const [isTimeSynced, setIsTimeSynced] = useState(false);
-  const [syncError, setSyncError] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [userLocation, setUserLocation] = useState<{ lat: number, lon: number } | null>(null);
   const [locationStatus, setLocationStatus] = useState<'idle' | 'checking' | 'active' | 'denied' | 'out_of_range'>('idle');
 
@@ -52,45 +51,7 @@ const AttendancePublic: React.FC = () => {
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
 
   // Robust Network Time Sync Logic targeting Syria/Turkey Time
-  const syncWithNetworkTime = async () => {
-    const timeAPIs = [
-      'https://timeapi.io/api/Time/current/zone?timeZone=Europe/Istanbul',
-      'https://worldtimeapi.org/api/timezone/Europe/Istanbul',
-      'https://worldtimeapi.org/api/timezone/Asia/Damascus'
-    ];
-
-    for (const apiUrl of timeAPIs) {
-      try {
-        const start = Date.now();
-        const response = await fetch(apiUrl, { cache: 'no-store' });
-        if (!response.ok) throw new Error('API Response Error');
-
-        const data = await response.json();
-        const remoteDateStr = data.dateTime || data.datetime;
-        const networkTime = new Date(remoteDateStr).getTime();
-
-        const end = Date.now();
-        const latency = (end - start) / 2;
-
-        const correctedNetworkTime = networkTime + latency;
-        const localDeviceTime = Date.now();
-
-        const offset = correctedNetworkTime - localDeviceTime;
-
-        // Only apply offset if it's significant (> 30s) or if explicitly syncing
-        if (Math.abs(offset) > 30000 || !isTimeSynced) {
-          setTimeOffset(offset);
-          setIsTimeSynced(true);
-        }
-        setSyncError(false);
-        return;
-      } catch (err) {
-        console.warn(`Failed to sync with ${apiUrl}:`, err);
-      }
-    }
-    setIsTimeSynced(false);
-    setSyncError(true);
-  };
+  // Network Sync moved to store.tsx
 
   const syncLocation = () => {
     if (!navigator.geolocation) {
@@ -112,7 +73,6 @@ const AttendancePublic: React.FC = () => {
   };
 
   useEffect(() => {
-    syncWithNetworkTime();
     syncLocation();
 
     // IP Fetching with timeout
@@ -134,8 +94,6 @@ const AttendancePublic: React.FC = () => {
     };
 
     fetchIP();
-
-    const syncInterval = setInterval(syncWithNetworkTime, 300000);
     
     // Immediate sync when coming back online
     const handleOnline = () => {
@@ -145,7 +103,6 @@ const AttendancePublic: React.FC = () => {
     window.addEventListener('online', handleOnline);
 
     return () => {
-      clearInterval(syncInterval);
       window.removeEventListener('online', handleOnline);
     };
   }, [refreshData]);
@@ -161,13 +118,7 @@ const AttendancePublic: React.FC = () => {
     return () => clearTimeout(timer);
   }, [refreshData]);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const syncedDate = new Date(Date.now() + timeOffset);
-      setCurrentTime(syncedDate);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [timeOffset]);
+  // Time handling moved to global store
 
   // Logic to identify the center based on IP
   const matchedCenter = useMemo(() => {

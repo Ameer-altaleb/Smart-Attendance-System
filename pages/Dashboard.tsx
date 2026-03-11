@@ -80,8 +80,8 @@ const CenterProgress = memo(({ center, percentage, records, totalEmps }: {
 CenterProgress.displayName = 'CenterProgress';
 
 const Dashboard: React.FC = () => {
-  const { employees, centers, attendance, pendingOperations, requestDataRecovery } = useApp();
-  const today = getTodayDateString();
+  const { employees, centers, attendance, pendingOperations, requestDataRecovery, currentTime } = useApp();
+  const today = format(currentTime, 'yyyy-MM-dd');
 
   const handleForceSync = async () => {
     if (window.confirm('سيتم إرسال أمر برفع جميع البيانات المعلقة من هواتف الموظفين الآن. هل تريد المتابعة؟')) {
@@ -217,7 +217,7 @@ const Dashboard: React.FC = () => {
             )}
             <div className="flex items-center gap-3 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100">
               <CalendarDays className="w-5 h-5 text-indigo-600" />
-              <span className="text-slate-700 font-black text-xs">{format(new Date(), 'dd MMMM yyyy', { locale: ar })}</span>
+              <span className="text-slate-700 font-black text-xs">{format(currentTime, 'dd MMMM yyyy', { locale: ar })}</span>
             </div>
           </div>
         </div>
