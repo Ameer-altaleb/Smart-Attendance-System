@@ -146,7 +146,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     mergeStrategy: 'replace' | 'merge' = 'replace'
   ) => {
     if (!checkSupabaseConnection() || !supabase) {
-      setDbStatus(prev => ({ ...prev, [tableName]: 'online' }));
+      setDbStatus(prev => ({ ...prev, [tableName]: 'offline' }));
       return;
     }
     try {
@@ -169,10 +169,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         } else if (mergeStrategy === 'merge') {
           setter((prev: any[]) => {
             const existingMap = new Map(prev.map(item => [item.id, item]));
+            
+            // Track IDs from server to handle deletions if necessary, 
+            // but here we primarily want to merge.
             data.forEach((newItem: any) => {
-              // Priority: Keep local 'pending' or 'failed' records even if server has data
               const existing = existingMap.get(newItem.id);
-              if (!existing || existing.syncStatus === 'synced') {
+              
+              // Only update if:
+              // 1. It's a new record
+              // 2. The existing record is already marked as 'synced' (no local changes pending)
+              if (!existing || existing.syncStatus === 'synced' || !existing.syncStatus) {
                 existingMap.set(newItem.id, { ...newItem, syncStatus: 'synced' });
               }
             });
@@ -226,37 +232,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 4. CRUD and Specialized Functions ---
   const retrySync = useCallback(async () => {
-    // 1. Sync pending notifications
-    const pendingNotifs = notifications.filter(n => n.syncStatus === 'pending' || n.syncStatus === 'failed');
-    for (const n of pendingNotifs) {
-      const { syncStatus: _s, ...dbRecord } = n;
-      executeDbOperation('notifications',
-        () => supabase!.from('notifications').insert(dbRecord),
-        (success) => {
-          if (success) {
-            setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, syncStatus: 'synced' } : item));
-          }
-        }
-      );
-    }
+    if (!checkSupabaseConnection() || !supabase) return;
 
-    // 2. Sync pending attendance records
-    const pendingAttendance = attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed');
-    if (pendingAttendance.length > 0) {
-      console.log(`[Sync] Attempting to retry ${pendingAttendance.length} pending attendance records...`);
-      for (const record of pendingAttendance) {
-        const { syncStatus: _s, ...dbRecord } = record;
-        executeDbOperation('attendance',
-          () => supabase!.from('attendance').upsert(dbRecord),
-          (success) => {
-            setAttendance(prev => prev.map(item =>
-              item.id === record.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item
-            ));
-          }
-        );
+    // Use functional updates to avoid dependency on state
+    setNotifications(prevNotifs => {
+      const pending = prevNotifs.filter(n => n.syncStatus === 'pending' || n.syncStatus === 'failed');
+      if (pending.length > 0) {
+        console.log(`[Sync] Retrying ${pending.length} pending notifications...`);
+        pending.forEach(n => {
+          const { syncStatus: _s, ...dbRecord } = n;
+          executeDbOperation('notifications',
+            () => supabase!.from('notifications').insert(dbRecord),
+            (success) => {
+              if (success) {
+                setNotifications(current => current.map(item => item.id === n.id ? { ...item, syncStatus: 'synced' } : item));
+              }
+            }
+          );
+        });
       }
-    }
-  }, [notifications, attendance, executeDbOperation]);
+      return prevNotifs;
+    });
+
+    setAttendance(prevAttendance => {
+      const pending = prevAttendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed');
+      if (pending.length > 0) {
+        console.log(`[Sync] Retrying ${pending.length} pending attendance records...`);
+        pending.forEach(record => {
+          const { syncStatus: _s, ...dbRecord } = record;
+          executeDbOperation('attendance',
+            () => supabase!.from('attendance').upsert(dbRecord),
+            (success) => {
+              if (success) {
+                setAttendance(current => current.map(item =>
+                  item.id === record.id ? { ...item, syncStatus: 'synced' } : item
+                ));
+              }
+            }
+          );
+        });
+      }
+      return prevAttendance;
+    });
+  }, [executeDbOperation]);
 
   // Deep recovery: scan localStorage for old attendance records and push to DB
   const recoverLocalAttendance = useCallback(async () => {
@@ -472,25 +490,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const sendRemoteRefresh = useCallback(async () => {
     if (!supabase) return;
-    const channel = supabase.channel('system-commands');
+    const channel = supabase.channel('system-commands-broadcast');
     await channel.subscribe();
     channel.send({
       type: 'broadcast',
       event: 'force-refresh',
       payload: { timestamp: new Date().toISOString(), sender: currentUser?.name || 'System' }
     });
-  }, [currentUser]);
+  }, [currentUser?.name]);
 
   const requestDataRecovery = useCallback(async () => {
     if (!supabase) return;
-    const channel = supabase.channel('system-commands');
+    const channel = supabase.channel('system-commands-recovery');
     await channel.subscribe();
     channel.send({
       type: 'broadcast',
       event: 'sync-local-records',
       payload: { timestamp: new Date().toISOString(), sender: currentUser?.name || 'Admin' }
     });
-  }, [currentUser]);
+  }, [currentUser?.name]);
 
   const testConnection = async () => {
     setIsLoading(true);
@@ -526,12 +544,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   useEffect(() => {
     if (!checkSupabaseConnection() || !supabase) return;
+
+    console.log('[Realtime] Initializing stable subscription...');
     const channel = supabase.channel('schema-db-changes')
-      .on('broadcast', { event: 'force-refresh' }, () => { window.location.reload(); })
-      .on('broadcast', { event: 'sync-local-records' }, () => { recoverLocalAttendance(); })
+      .on('broadcast', { event: 'force-refresh' }, () => { 
+        console.log('[Realtime] Force refresh received');
+        window.location.reload(); 
+      })
+      .on('broadcast', { event: 'sync-local-records' }, () => { 
+        console.log('[Realtime] Data recovery requested');
+        recoverLocalAttendance(); 
+      })
       .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
         const { table, eventType, new: newRecord, old: oldRecord } = payload;
         if (!isMounted.current) return;
+        
+        console.log(`[Realtime] Change in ${table}: ${eventType}`);
+
         switch (table) {
           case 'attendance':
             if (eventType === 'INSERT') {
@@ -610,11 +639,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       })
       .subscribe((status) => {
+        console.log(`[Realtime] Subscription status: ${status}`);
         if (status === 'SUBSCRIBED') setIsRealtimeConnected(true);
         else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsRealtimeConnected(false);
       });
-    return () => { supabase.removeChannel(channel); };
-  }, [retrySync]);
+
+    return () => { 
+      console.log('[Realtime] Cleaning up subscription...');
+      supabase.removeChannel(channel); 
+    };
+  }, [recoverLocalAttendance]);
 
   useEffect(() => {
     const unsubscribe = connectionMonitor.subscribe((online) => { if (online) retrySync(); });
