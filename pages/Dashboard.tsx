@@ -117,20 +117,40 @@ const Dashboard: React.FC = () => {
     [attendance, today, activeCenterIds]
   );
 
-  // Calculate advanced statistics based on active filters
+  // Currently present = today's records OR any open shift records (checked in, not checked out)
+  const currentlyPresent = useMemo(() => {
+    const todayIds = new Set(todayRecords.map(r => r.employeeId));
+    // Find shift workers with open records from previous days
+    const openShiftRecords = attendance.filter(a => 
+      a.date !== today && 
+      a.checkIn && 
+      !a.checkOut && 
+      activeCenterIds.has(a.centerId)
+    );
+    // Combine: today's records + open shifts not already counted
+    const combined = [...todayRecords];
+    openShiftRecords.forEach(r => {
+      if (!todayIds.has(r.employeeId)) {
+        combined.push(r);
+      }
+    });
+    return combined;
+  }, [attendance, todayRecords, today, activeCenterIds]);
+
   const stats = useMemo(() => {
     const totalEmps = activeEmployees.length;
-    const presentToday = todayRecords.length;
+    const adminCount = currentlyPresent.filter(r => employeeMap.get(r.employeeId)?.workType === 'administrative').length;
+    const shiftCount = currentlyPresent.filter(r => employeeMap.get(r.employeeId)?.workType === 'shifts').length;
     const lateToday = todayRecords.filter(a => a.status === 'late').length;
     const activeCentersCount = activeCentersList.length;
 
     return [
       { label: 'إجمالي الموظفين (النشطين)', value: totalEmps, icon: Users, color: 'indigo', trend: 'القوة الميدانية حالياً' },
-      { label: 'سجلات اليوم', value: presentToday, icon: UserCheck, color: 'emerald', trend: `${((presentToday / totalEmps) * 100 || 0).toFixed(0)}% نسبة الحضور` },
-      { label: 'حالات التأخير', value: lateToday, icon: Clock, color: 'amber', trend: 'يحتاج متابعة' },
+      { label: 'إداريين متواجدين', value: adminCount, icon: UserCheck, color: 'emerald', trend: 'المقر الرئيسي والمراكز' },
+      { label: 'مناوبين متواجدين', value: shiftCount, icon: Activity, color: 'rose', trend: 'المناوبات الجارية حالياً' },
       { label: 'المراكز النشطة', value: activeCentersCount, icon: Building2, color: 'blue', trend: 'تعمل حالياً' },
     ];
-  }, [activeEmployees, activeCentersList, todayRecords]);
+  }, [activeEmployees, activeCentersList, todayRecords, currentlyPresent, employeeMap]);
 
   // Pie chart data - active centers only
   const pieData = useMemo(() => {

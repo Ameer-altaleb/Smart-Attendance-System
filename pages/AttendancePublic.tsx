@@ -256,7 +256,22 @@ const AttendancePublic: React.FC = () => {
         let shouldProceedIn = !hasOpenRecord;
 
         if (hasOpenRecord) {
-          if (!isShiftWorker && recentRecord.date !== today) {
+          const checkInTime = new Date(recentRecord.checkIn!).getTime();
+          const hoursSinceCheckIn = (currentSyncedTime.getTime() - checkInTime) / (1000 * 60 * 60);
+
+          if (isShiftWorker && hoursSinceCheckIn > 72) {
+            // إغلاق آلي لمناوبة مفتوحة أكثر من 72 ساعة (3 أيام كحد أقصى)
+            const maxShiftHours = 48; // أقصى مدة مناوبة معقولة
+            const autoCloseTime = new Date(checkInTime + (maxShiftHours * 60 * 60 * 1000));
+            
+            await updateAttendance({
+              ...recentRecord,
+              checkOut: autoCloseTime.toISOString(),
+              workingHours: maxShiftHours,
+              notes: 'إغلاق آلي — نسيان بصمة خروج مناوبة'
+            });
+            shouldProceedIn = true;
+          } else if (!isShiftWorker && recentRecord.date !== today) {
             // إغلاق آلي للموظف الإداري الذي نسي البصمة
             const [sH, sM] = selectedCenter.defaultStartTime.split(':').map(Number);
             const [eH, eM] = selectedCenter.defaultEndTime.split(':').map(Number);
@@ -265,13 +280,16 @@ const AttendancePublic: React.FC = () => {
 
             await updateAttendance({
               ...recentRecord,
-              checkOut: new Date(new Date(recentRecord.checkIn!).getTime() + (totalMins / 2) * 60000).toISOString(),
+              checkOut: new Date(checkInTime + (totalMins / 2) * 60000).toISOString(),
               workingHours: Number(penaltyHrs.toFixed(2)),
               notes: 'إغلاق آلي + خصم نسيان بصمة'
             });
             shouldProceedIn = true;
           } else {
-            setMessage({ text: 'لديك سجل دخول نشط بالفعل. يرجى تسجيل الخروج أولاً عند انتهاء المناوبة.', type: 'error' });
+            const msg = isShiftWorker 
+              ? `لديك مناوبة مفتوحة منذ ${Math.floor(hoursSinceCheckIn)} ساعة. يرجى تسجيل الخروج أولاً.`
+              : 'لديك سجل دخول نشط بالفعل. يرجى تسجيل الخروج أولاً.';
+            setMessage({ text: msg, type: 'error' });
             setIsSubmitting(false);
             return;
           }
@@ -640,51 +658,6 @@ const AttendancePublic: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* عداد ساعات العمل اللحظي */}
-                    {todayRecord?.checkIn && !todayRecord?.checkOut && (() => {
-                      const checkInTime = new Date(todayRecord.checkIn!);
-                      const diffMs = currentTime.getTime() - checkInTime.getTime();
-                      const diffHrs = Math.floor(diffMs / 3600000);
-                      const diffMins = Math.floor((diffMs % 3600000) / 60000);
-                      return (
-                        <div className="p-4 bg-gradient-to-l from-emerald-50 to-indigo-50 border border-emerald-100/50 rounded-2xl flex items-center justify-between animate-in fade-in duration-500">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
-                              <Clock className="w-5 h-5 text-indigo-600" />
-                            </div>
-                            <div>
-                              <p className="text-[10px] font-bold text-slate-500">ساعات العمل حتى الآن</p>
-                              <p className="text-lg font-black text-slate-900" dir="ltr">{diffHrs}h {diffMins}m</p>
-                            </div>
-                          </div>
-                          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* ملخص اليوم بعد تسجيل الخروج */}
-                    {todayRecord?.checkIn && todayRecord?.checkOut && (
-                      <div className="p-5 bg-gradient-to-l from-indigo-50 to-slate-50 border border-indigo-100/50 rounded-2xl space-y-3 animate-in fade-in duration-500">
-                        <div className="flex items-center gap-2 mb-1">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">ملخص يوم العمل</p>
-                        </div>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="text-center p-3 bg-white rounded-xl shadow-sm">
-                            <p className="text-[9px] font-bold text-slate-400 mb-1">الدخول</p>
-                            <p className="text-sm font-black text-emerald-700" dir="ltr">{format(new Date(todayRecord.checkIn!), 'hh:mm a', { locale: ar })}</p>
-                          </div>
-                          <div className="text-center p-3 bg-white rounded-xl shadow-sm">
-                            <p className="text-[9px] font-bold text-slate-400 mb-1">الخروج</p>
-                            <p className="text-sm font-black text-indigo-700" dir="ltr">{format(new Date(todayRecord.checkOut!), 'hh:mm a', { locale: ar })}</p>
-                          </div>
-                          <div className="text-center p-3 bg-white rounded-xl shadow-sm">
-                            <p className="text-[9px] font-bold text-slate-400 mb-1">الساعات</p>
-                            <p className="text-sm font-black text-slate-900">{todayRecord.workingHours}h</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
 
                     {isAttendanceLoading && !todayRecord && (
                       <div className="p-5 bg-indigo-50/50 border border-indigo-100 rounded-2xl flex items-center gap-4 animate-pulse">
