@@ -171,8 +171,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (tableName === 'attendance') {
           // Use synced time for cutoff to ensure consistency across devices
           const cutoffDate = new Date(Date.now() + timeOffset);
-          // Broaden to 90 days to handle edge case of devices offline for long periods
-          cutoffDate.setDate(cutoffDate.getDate() - 90);
+          // Only fetch last 7 days to minimize bandwidth — reports page fetches more on demand
+          cutoffDate.setDate(cutoffDate.getDate() - 7);
           query = query.gte('date', cutoffDate.toISOString().split('T')[0]);
         }
         return await query;
@@ -686,7 +686,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         retrySync(); 
         recoverLocalAttendance(); 
       } 
-    }, 30000); // Retry every 30 seconds for faster sync
+    }, 60000); // Retry every 60 seconds — balanced for bandwidth savings
     return () => {
       clearInterval(interval);
       navigator.serviceWorker?.removeEventListener('message', handleMessage);
@@ -696,8 +696,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     if (!checkSupabaseConnection() || !supabase) return;
 
-    console.log('[Realtime] Initializing stable subscription...');
-    const channel = supabase.channel('schema-db-changes')
+    console.log('[Realtime] Initializing optimized subscriptions (attendance + employees + centers only)...');
+    
+    // OPTIMIZATION: Subscribe only to critical tables to reduce Realtime messages
+    // Static tables (settings, templates, holidays, projects) are loaded on init
+    // and refreshed manually when admin makes changes
+    const channel = supabase.channel('critical-changes')
       .on('broadcast', { event: 'force-refresh' }, () => { 
         console.log('[Realtime] Force refresh received');
         window.location.reload(); 
@@ -706,87 +710,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         console.log('[Realtime] Data recovery requested');
         recoverLocalAttendance(); 
       })
-      .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
-        const { table, eventType, new: newRecord, old: oldRecord } = payload;
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, (payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
         if (!isMounted.current) return;
-        
-        console.log(`[Realtime] Change in ${table}: ${eventType}`);
-
-        switch (table) {
-          case 'attendance':
-            if (eventType === 'INSERT') {
-              setAttendance(prev => prev.some(r => r.id === (newRecord as AttendanceRecord).id) ? prev : [...prev, { ...newRecord as AttendanceRecord, syncStatus: 'synced' }]);
-            } else if (eventType === 'UPDATE') {
-              setAttendance(prev => prev.map(r => r.id === (newRecord as AttendanceRecord).id ? { ...newRecord as AttendanceRecord, syncStatus: 'synced' } : r));
-            } else if (eventType === 'DELETE') {
-              setAttendance(prev => prev.filter(r => r.id !== (oldRecord as any).id));
-            }
-            break;
-          case 'employees':
-            if (eventType === 'INSERT') {
-              setEmployees(prev => prev.some(e => e.id === (newRecord as Employee).id) ? prev : [...prev, newRecord as Employee]);
-            } else if (eventType === 'UPDATE') {
-              const updated = newRecord as Employee;
-              if (updated.deleted_at) setEmployees(prev => prev.filter(e => e.id !== updated.id));
-              else setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e));
-            } else if (eventType === 'DELETE') {
-              setEmployees(prev => prev.filter(e => e.id !== (oldRecord as any).id));
-            }
-            break;
-          case 'projects':
-            if (eventType === 'INSERT') {
-              setProjects(prev => prev.some(p => p.id === (newRecord as Project).id) ? prev : [...prev, newRecord as Project]);
-            } else if (eventType === 'UPDATE') {
-              const updated = newRecord as Project;
-              if (updated.deleted_at) setProjects(prev => prev.filter(p => p.id !== updated.id));
-              else setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
-            } else if (eventType === 'DELETE') {
-              setProjects(prev => prev.filter(p => p.id !== (oldRecord as any).id));
-            }
-            break;
-          case 'centers':
-            if (eventType === 'INSERT') {
-              setCenters(prev => prev.some(c => c.id === (newRecord as Center).id) ? prev : [...prev, newRecord as Center]);
-            } else if (eventType === 'UPDATE') {
-              setCenters(prev => prev.map(c => c.id === (newRecord as Center).id ? (newRecord as Center) : c));
-            } else if (eventType === 'DELETE') {
-              setCenters(prev => prev.filter(c => c.id !== (oldRecord as any).id));
-            }
-            break;
-          case 'admins':
-            if (eventType === 'INSERT') {
-              setAdmins(prev => prev.some(a => a.id === (newRecord as Admin).id) ? prev : [...prev, newRecord as Admin]);
-            } else if (eventType === 'UPDATE') {
-              setAdmins(prev => prev.map(a => a.id === (newRecord as Admin).id ? (newRecord as Admin) : a));
-            } else if (eventType === 'DELETE') {
-              setAdmins(prev => prev.filter(a => a.id !== (oldRecord as any).id));
-            }
-            break;
-          case 'holidays':
-            if (eventType === 'INSERT') {
-              setHolidays(prev => prev.some(h => h.id === (newRecord as Holiday).id) ? prev : [...prev, newRecord as Holiday]);
-            } else if (eventType === 'DELETE') {
-              setHolidays(prev => prev.filter(h => h.id !== (oldRecord as any).id));
-            }
-            break;
-          case 'settings':
-            if (eventType === 'UPDATE' || eventType === 'INSERT') setSettings(newRecord as SystemSettings);
-            break;
-          case 'notifications':
-            if (eventType === 'INSERT') {
-              setNotifications(prev => prev.some(n => n.id === (newRecord as Notification).id) ? prev : [...prev, { ...newRecord as Notification, syncStatus: 'synced' }]);
-            } else if (eventType === 'DELETE') {
-              setNotifications(prev => prev.filter(n => n.id !== (oldRecord as any).id));
-            }
-            break;
-          case 'templates':
-            if (eventType === 'UPDATE' || eventType === 'INSERT') {
-              setTemplates(prev => {
-                const updated = newRecord as MessageTemplate;
-                return prev.some(t => t.id === updated.id) ? prev.map(t => t.id === updated.id ? updated : t) : [...prev, updated];
-              });
-            }
-            break;
+        console.log(`[Realtime] attendance: ${eventType}`);
+        if (eventType === 'INSERT') {
+          setAttendance(prev => prev.some(r => r.id === (newRecord as AttendanceRecord).id) ? prev : [...prev, { ...newRecord as AttendanceRecord, syncStatus: 'synced' }]);
+        } else if (eventType === 'UPDATE') {
+          setAttendance(prev => prev.map(r => r.id === (newRecord as AttendanceRecord).id ? { ...newRecord as AttendanceRecord, syncStatus: 'synced' } : r));
+        } else if (eventType === 'DELETE') {
+          setAttendance(prev => prev.filter(r => r.id !== (oldRecord as any).id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, (payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        if (!isMounted.current) return;
+        console.log(`[Realtime] employees: ${eventType}`);
+        if (eventType === 'INSERT') {
+          setEmployees(prev => prev.some(e => e.id === (newRecord as Employee).id) ? prev : [...prev, newRecord as Employee]);
+        } else if (eventType === 'UPDATE') {
+          const updated = newRecord as Employee;
+          if (updated.deleted_at) setEmployees(prev => prev.filter(e => e.id !== updated.id));
+          else setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e));
+        } else if (eventType === 'DELETE') {
+          setEmployees(prev => prev.filter(e => e.id !== (oldRecord as any).id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'centers' }, (payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        if (!isMounted.current) return;
+        console.log(`[Realtime] centers: ${eventType}`);
+        if (eventType === 'INSERT') {
+          setCenters(prev => prev.some(c => c.id === (newRecord as Center).id) ? prev : [...prev, newRecord as Center]);
+        } else if (eventType === 'UPDATE') {
+          setCenters(prev => prev.map(c => c.id === (newRecord as Center).id ? (newRecord as Center) : c));
+        } else if (eventType === 'DELETE') {
+          setCenters(prev => prev.filter(c => c.id !== (oldRecord as any).id));
         }
       })
       .subscribe((status) => {
