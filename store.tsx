@@ -169,11 +169,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         
         // Attendance: only fetch recent history to avoid loading thousands of old records
         if (tableName === 'attendance') {
-          // Use synced time for cutoff to ensure consistency across devices
-          const cutoffDate = new Date(Date.now() + timeOffset);
-          // Only fetch last 7 days to minimize bandwidth — reports page fetches more on demand
-          cutoffDate.setDate(cutoffDate.getDate() - 7);
-          query = query.gte('date', cutoffDate.toISOString().split('T')[0]);
+          // Only fetch TODAY's records to minimize bandwidth
+          // Reports page fetches historical data on demand when user selects date range
+          const today = new Date(Date.now() + timeOffset);
+          const todayStr = today.toISOString().split('T')[0];
+          query = query.gte('date', todayStr);
         }
         return await query;
       });
