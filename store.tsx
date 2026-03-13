@@ -12,6 +12,7 @@ import {
 } from './constants.tsx';
 import { supabase, checkSupabaseConnection } from './lib/supabase.ts';
 import { storageManager, requestQueue, withRetry, debounce, connectionMonitor } from './utils/performance.ts';
+import { writeToSyncQueue, removeFromSyncQueue } from './utils/syncQueue.ts';
 
 interface AppContextType {
   centers: Center[];
@@ -132,15 +133,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     let success = false;
     try {
       if (checkSupabaseConnection() && supabase) {
-        const { error } = await withRetry(async () => await operation());
+        const result = await withRetry(async () => await operation());
+        const error = result?.error;
         success = !error;
-        if (error) console.error(`Database error in ${tableName}:`, error);
+        if (error) console.error(`[DB] Error in ${tableName}:`, JSON.stringify(error));
+      } else {
+        console.warn(`[DB] Supabase not configured, skipping ${tableName} operation`);
       }
       onComplete?.(success);
       updatePendingOps(tableName, -1);
       return success;
     } catch (error) {
-      console.error(`Execution error in ${tableName}:`, error);
+      console.error(`[DB] Execution error in ${tableName}:`, error);
       onComplete?.(false);
       updatePendingOps(tableName, -1);
       return false;
@@ -248,7 +252,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 4. CRUD and Specialized Functions ---
   const retrySync = useCallback(async () => {
-    if (!checkSupabaseConnection() || !supabase) return;
+    if (!checkSupabaseConnection() || !supabase) {
+      console.warn('[Sync] Supabase not available, skipping retrySync');
+      return;
+    }
 
     // Use functional updates to avoid dependency on state
     setNotifications(prevNotifs => {
@@ -262,6 +269,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             (success) => {
               if (success) {
                 setNotifications(current => current.map(item => item.id === n.id ? { ...item, syncStatus: 'synced' } : item));
+              } else {
+                // Mark as failed so the UI can show the failure state
+                setNotifications(current => current.map(item => item.id === n.id ? { ...item, syncStatus: 'failed' } : item));
               }
             }
           );
@@ -273,15 +283,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAttendance(prevAttendance => {
       const pending = prevAttendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed');
       if (pending.length > 0) {
-        console.log(`[Sync] Retrying ${pending.length} pending attendance records...`);
+        console.log(`[Sync] ⚠️ Retrying ${pending.length} pending attendance records...`);
         pending.forEach(record => {
           const { syncStatus: _s, ...dbRecord } = record;
+          console.log(`[Sync] Attempting sync for record ${record.id} (employee: ${record.employeeId}, date: ${record.date})`);
           executeDbOperation('attendance',
             () => supabase!.from('attendance').upsert(dbRecord),
             (success) => {
               if (success) {
+                console.log(`[Sync] ✅ Record ${record.id} synced successfully`);
                 setAttendance(current => current.map(item =>
                   item.id === record.id ? { ...item, syncStatus: 'synced' } : item
+                ));
+              } else {
+                console.error(`[Sync] ❌ Record ${record.id} sync FAILED — will retry`);
+                setAttendance(current => current.map(item =>
+                  item.id === record.id ? { ...item, syncStatus: 'failed' } : item
                 ));
               }
             }
@@ -292,40 +309,67 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   }, [executeDbOperation]);
 
-  // Deep recovery: scan permanent audit log for any records missing from DB
+  // Deep recovery: scan permanent audit log for records missing from DB
+  // Optimized: only syncs records that are NOT confirmed synced in current state
   const recoverLocalAttendance = useCallback(async () => {
     if (!checkSupabaseConnection() || !supabase) return;
 
     try {
-      // Step 1: Check the Permanent Audit Log (The absolute source of truth)
+      // Step 1: Check the Permanent Audit Log
       const rawAudit = localStorage.getItem('attendance_audit_log');
       if (!rawAudit) return;
 
       const auditRecords: AttendanceRecord[] = JSON.parse(rawAudit);
       if (!Array.isArray(auditRecords) || auditRecords.length === 0) return;
 
-      // Step 2: Identify records that are not confirmed as 'synced' in the main state
-      // or records that might be missing from the server entirely
-      console.log(`[Audit] Checking ${auditRecords.length} records for recovery...`);
-      const successfullySyncedIds: string[] = [];
+      // Step 2: Only recover records that are NOT currently synced in state
+      // Use functional read to get latest state without dependency
+      let unsyncedFromAudit: AttendanceRecord[] = [];
+      setAttendance(currentState => {
+        const syncedIds = new Set(
+          currentState.filter(a => a.syncStatus === 'synced').map(a => a.id)
+        );
+        unsyncedFromAudit = auditRecords.filter(r => !syncedIds.has(r.id));
+        return currentState; // Don't modify state
+      });
 
-      for (const record of auditRecords) {
-        // We attempt to upsert everything from the audit log to ensure the server is complete
-        const { syncStatus: _s, ...dbRecord } = record;
-        try {
-          const { error } = await supabase.from('attendance').upsert(dbRecord);
-          if (!error) {
-            successfullySyncedIds.push(record.id);
-            // Update local state to reflect sync
-            setAttendance(prev => prev.map(a => a.id === record.id ? { ...a, syncStatus: 'synced' } : a));
+      if (unsyncedFromAudit.length === 0) return;
+
+      console.log(`[Audit] Found ${unsyncedFromAudit.length} unsynced records to recover (out of ${auditRecords.length} total)`);
+
+      // Step 3: Process in batches of 10 to avoid rate limiting
+      const BATCH_SIZE = 10;
+      let successCount = 0;
+
+      for (let i = 0; i < unsyncedFromAudit.length; i += BATCH_SIZE) {
+        const batch = unsyncedFromAudit.slice(i, i + BATCH_SIZE);
+        const results = await Promise.allSettled(
+          batch.map(async (record) => {
+            const { syncStatus: _s, ...dbRecord } = record;
+            const { error } = await supabase!.from('attendance').upsert(dbRecord);
+            if (error) throw error;
+            return record.id;
+          })
+        );
+
+        results.forEach((result, idx) => {
+          if (result.status === 'fulfilled') {
+            successCount++;
+            const recordId = result.value;
+            setAttendance(prev => prev.map(a => a.id === recordId ? { ...a, syncStatus: 'synced' } : a));
+          } else {
+            console.error(`[Audit] Sync failed for ${batch[idx].id}:`, result.reason);
           }
-        } catch (err) {
-          console.error(`[Audit] Sync failed for ${record.id}:`, err);
+        });
+
+        // Small delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < unsyncedFromAudit.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
 
-      if (successfullySyncedIds.length > 0) {
-        console.log(`[Audit] Recovered/Verified ${successfullySyncedIds.length} records.`);
+      if (successCount > 0) {
+        console.log(`[Audit] ✅ Recovered ${successCount} of ${unsyncedFromAudit.length} records.`);
       }
     } catch (err) {
       console.error('[Audit] Recovery failed:', err);
@@ -371,34 +415,64 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
       // Prevent duplicates in audit log
       if (!auditLog.some((item: AttendanceRecord) => item.id === r.id)) {
-        auditLog.push({ ...r, syncStatus: 'synced' }); // We store it as 'synced' in audit so recovery knows it's ready
-        localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000))); // Keep last 1000 records
+        auditLog.push({ ...r, syncStatus: 'synced' });
+        localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
       }
     } catch (e) {
       console.error('CRITICAL: Failed to write to Permanent Audit Log', e);
     }
 
-    // 2. Optimistic UI Update - Show success to employee immediately
+    // 2. Also write to IndexedDB for Service Worker background sync
+    try {
+      await writeToSyncQueue(r);
+    } catch (e) {
+      console.warn('[IDB] Failed to write to IndexedDB sync queue', e);
+    }
+
+    // 3. Optimistic UI Update - Show success to employee immediately
     const recordWithStatus = { ...r, syncStatus: 'pending' as const };
     setAttendance(prev => {
       if (prev.some(item => item.id === r.id)) return prev;
       return [...prev, recordWithStatus];
     });
 
-    // 3. Background Sync Dispatch
-    // If we are online, attempt immediate sync, but don't block the UI
+    // 4. Immediate Sync with 3 retries (non-blocking but tracked)
     if (navigator.onLine && supabase) {
       const { syncStatus: _s, ...dbRecord } = r;
-      supabase.from('attendance').upsert(dbRecord).then(({ error }) => {
-        if (!error) {
-          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
-        } else {
-          console.warn('[Sync] Immediate upload failed, will retry in background', error);
+      console.log(`[Sync] 🔄 Attempting immediate sync for record ${r.id}...`);
+
+      let syncSuccess = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const { error } = await supabase.from('attendance').upsert(dbRecord);
+          if (!error) {
+            console.log(`[Sync] ✅ Record ${r.id} synced on attempt ${attempt}`);
+            setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
+            // Remove from IndexedDB sync queue
+            try { await removeFromSyncQueue(r.id); } catch (_e) { /* ignore */ }
+            syncSuccess = true;
+            break;
+          } else {
+            console.error(`[Sync] ❌ Attempt ${attempt}/3 failed for ${r.id}:`, JSON.stringify(error));
+          }
+        } catch (err) {
+          console.error(`[Sync] ❌ Attempt ${attempt}/3 threw for ${r.id}:`, err);
         }
-      });
+        // Wait before retrying (1s, 2s, 4s)
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+        }
+      }
+
+      if (!syncSuccess) {
+        console.error(`[Sync] ❌❌ All 3 attempts failed for record ${r.id} — marking as failed, will retry in background`);
+        setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
+      }
+    } else {
+      console.warn(`[Sync] Offline or Supabase unavailable — record ${r.id} will sync later`);
     }
 
-    // 4. Register Background Sync if available
+    // 5. Register Background Sync if available
     if ('serviceWorker' in navigator && 'SyncManager' in window) {
       try {
         const registration = await navigator.serviceWorker.ready;
@@ -408,7 +482,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     }
 
-    return true; // Always return true because data is secured in Audit Log
+    return true; // Always return true because data is secured in Audit Log + IndexedDB
   }, []);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
@@ -612,7 +686,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         retrySync(); 
         recoverLocalAttendance(); 
       } 
-    }, 60000); // Increased frequency to 1 minute
+    }, 30000); // Retry every 30 seconds for faster sync
     return () => {
       clearInterval(interval);
       navigator.serviceWorker?.removeEventListener('message', handleMessage);
@@ -728,9 +802,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [recoverLocalAttendance]);
 
   useEffect(() => {
-    const unsubscribe = connectionMonitor.subscribe((online) => { if (online) retrySync(); });
+    const unsubscribe = connectionMonitor.subscribe((online) => {
+      if (online) {
+        console.log('[Connection] Back online — triggering immediate sync + delayed retry');
+        retrySync();
+        recoverLocalAttendance();
+        // Also retry after 5 seconds in case the network needs time to stabilize
+        setTimeout(() => {
+          retrySync();
+          recoverLocalAttendance();
+        }, 5000);
+      }
+    });
     return unsubscribe;
-  }, [retrySync]);
+  }, [retrySync, recoverLocalAttendance]);
 
   const contextValue = useMemo(() => ({
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
