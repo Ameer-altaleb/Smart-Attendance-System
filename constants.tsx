@@ -12,7 +12,7 @@ export const INITIAL_HOLIDAYS: Holiday[] = [];
 export const INITIAL_NOTIFICATIONS: Notification[] = [];
 
 export const INITIAL_PROJECTS: Project[] = [];
-export const APP_VERSION = '2.0.0-pwa';
+export const APP_VERSION = '2.1.0-pwa';
 
 export const INITIAL_TEMPLATES: MessageTemplate[] = [
   { id: 't1', type: 'check_in', content: 'تم تسجيل دخولك بنجاح في الوقت المحدد. نتمنى لك يوماً سعيداً!' },
