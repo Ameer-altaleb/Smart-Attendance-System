@@ -25,8 +25,14 @@ const AttendancePublic: React.FC = () => {
   const {
     centers, employees, attendance, addAttendance, updateAttendance,
     updateEmployee, templates, notifications, settings, refreshData,
-    currentTime, timeOffset, isTimeSynced
+    currentTime, timeOffset, isTimeSynced, retrySync
   } = useApp();
+
+  const unsyncedCount = useMemo(() => 
+    attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed').length,
+    [attendance]
+  );
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const [selectedCenterId, setSelectedCenterId] = useState(() => localStorage.getItem('last_center_id') || '');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => localStorage.getItem('last_emp_id') || '');
@@ -236,7 +242,7 @@ const AttendancePublic: React.FC = () => {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      const today = getTodayDateString();
+      const today = format(currentSyncedTime, 'yyyy-MM-dd');
 
       // العثور على أحدث سجل للموظف
       const recentRecord = [...attendance]
@@ -300,15 +306,29 @@ const AttendancePublic: React.FC = () => {
             latitude: userLocation?.lat,
             longitude: userLocation?.lon
           };
-          setMessage({ text: 'جاري تأمين البصمة في جهازك...', type: 'success' });
+          setMessage({ text: 'جاري تأمين البصمة في النظام، يرجى الانتظار...', type: 'success' });
 
-          await addAttendance(record);
+          const startTime = Date.now();
+          const success = await addAttendance(record);
+          const elapsedTime = Date.now() - startTime;
 
-          const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
-          setMessage({
-            text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تأمين البصمة بنجاح في جهازك') + ' وسيتم الرفع للسيرفر تلقائياً.',
-            type: 'success'
-          });
+          // Ensure at least 4 seconds of display for user peace of mind
+          if (elapsedTime < 4000) {
+            await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
+          }
+
+          if (success) {
+            const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
+            setMessage({
+              text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح') + ' (تم الحفظ في النظام)',
+              type: 'success'
+            });
+          } else {
+            setMessage({
+              text: 'تم تأمين البصمة على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.',
+              type: 'success'
+            });
+          }
         }
       } else {
         if (!hasOpenRecord) {
@@ -333,15 +353,29 @@ const AttendancePublic: React.FC = () => {
             longitude: userLocation?.lon
           };
 
-          setMessage({ text: 'جاري تأمين الانصراف في جهازك...', type: 'success' });
+          setMessage({ text: 'جاري تأمين بصمة الخروج في النظام، يرجى الانتظار...', type: 'success' });
 
-          await updateAttendance(updatedRecord);
+          const startTime = Date.now();
+          const success = await updateAttendance(updatedRecord);
+          const elapsedTime = Date.now() - startTime;
 
-          const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
-          setMessage({
-            text: (template?.content.replace('{minutes}', early.toString()) || 'تم تأمين الانصراف بنجاح') + ' وسيتم الرفع للسيرفر تلقائياً.',
-            type: 'success'
-          });
+          // Minimum 4 seconds overlay
+          if (elapsedTime < 4000) {
+            await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
+          }
+
+          if (success) {
+            const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
+            setMessage({
+              text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح') + ' (تم الحفظ في النظام)',
+              type: 'success'
+            });
+          } else {
+            setMessage({
+              text: 'تم تأمين انصرافك على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.',
+              type: 'success'
+            });
+          }
         }
       }
       // Removed immediate refreshData('attendance') to prevent race condition
@@ -372,8 +406,8 @@ const AttendancePublic: React.FC = () => {
               <Save className="absolute inset-0 m-auto w-8 h-8 text-indigo-600 animate-pulse" />
             </div>
             <div className="space-y-2">
-              <h3 className="text-xl font-black text-slate-900">جاري تأمين البصمة...</h3>
-              <p className="text-sm text-slate-500 font-bold leading-relaxed">يتم الآن الحفظ في "السجل الدائم" للجهاز. <span className="text-emerald-600">بياناتك آمنة</span> وسيتم رفعها للسيرفر فور توفر الإنترنت.</p>
+              <h3 className="text-xl font-black text-slate-900">جاري تسجيل البصمة...</h3>
+              <p className="text-sm text-slate-500 font-bold leading-relaxed">يرجى الانتظار والاتصال بالإنترنت، <span className="text-rose-600">لا تغلق الصفحة الآن</span> لضمان وصول بياناتك.</p>
             </div>
           </div>
         </div>
@@ -421,7 +455,7 @@ const AttendancePublic: React.FC = () => {
 
         {/* Status Badges Overlay */}
         <div className="flex flex-col items-center gap-3 -mt-3 relative z-20">
-          <div className="flex justify-center gap-3">
+          <div className="flex justify-center gap-3 flex-wrap">
             {isTimeSynced && (
               <div className="px-3 py-1 bg-emerald-50/80 backdrop-blur-sm border border-emerald-100/50 rounded-full shadow-sm flex items-center gap-1.5">
                 <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
@@ -434,6 +468,31 @@ const AttendancePublic: React.FC = () => {
               <Navigation className="w-3 h-3" />
               <span className="text-[9px] font-black uppercase">{locationStatus === 'active' ? 'GPS Active' : 'GPS Inactive'}</span>
             </div>
+            {/* Unsynced Records Indicator + Manual Retry */}
+            {unsyncedCount > 0 && (
+              <button
+                onClick={async () => {
+                  setIsSyncing(true);
+                  try {
+                    await retrySync();
+                    await refreshData('attendance');
+                  } finally {
+                    setTimeout(() => setIsSyncing(false), 2000);
+                  }
+                }}
+                disabled={isSyncing}
+                className="px-3 py-1 bg-amber-50/80 backdrop-blur-sm border border-amber-200 rounded-full shadow-sm flex items-center gap-1.5 animate-pulse hover:bg-amber-100 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+              >
+                {isSyncing ? (
+                  <Loader2 className="w-3 h-3 text-amber-600 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3 h-3 text-amber-600" />
+                )}
+                <span className="text-[9px] font-black text-amber-700 uppercase">
+                  {isSyncing ? 'جاري المزامنة...' : `${unsyncedCount} سجل معلق — اضغط للمزامنة`}
+                </span>
+              </button>
+            )}
           </div>
 
         </div>
