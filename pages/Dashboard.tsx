@@ -4,293 +4,343 @@ import {
   Users, Building2, Clock, CheckCircle,
   AlertCircle, TrendingUp, ArrowUpRight,
   ShieldCheck, Zap, UserCheck, UserMinus,
-  Activity, Map as MapIcon, CalendarDays, Loader2, WifiOff, RefreshCcw
+  Activity, Map as MapIcon, CalendarDays, Loader2, WifiOff, RefreshCcw,
+  CheckCircle2, AlertTriangle, Bell, Clock8, Info, Search, PowerOff
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell
+  ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell,
+  LineChart, Line
 } from 'recharts';
-import { format } from 'date-fns';
+import { format, isToday, isYesterday, subDays, startOfDay, endOfDay } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { getTodayDateString, getSyriaDate } from '../utils/attendanceLogic.ts';
 
-// Memoized Stat Card
-const StatCard = memo(({ stat, index }: { stat: any; index: number }) => (
-  <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 relative overflow-hidden group hover:border-indigo-200 transition-all">
-    <div className={`w-12 h-12 rounded-2xl bg-${stat.color}-50 text-${stat.color}-600 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform`}>
-      <stat.icon className="w-6 h-6" />
-    </div>
-    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{stat.label}</p>
-    <h3 className="text-4xl font-black text-slate-900 mb-4">{stat.value}</h3>
-    <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 bg-slate-50 px-3 py-1.5 rounded-full w-fit">
-      <Activity className="w-3 h-3 text-indigo-500" /> {stat.trend}
-    </div>
-    <div className={`absolute top-0 left-0 w-1.5 h-full bg-${stat.color}-500 opacity-20`}></div>
+// --- Premium UI Components ---
+
+const GlassCard = ({ children, className = "", hover = true }: { children: React.ReactNode, className?: string, hover?: boolean }) => (
+  <div className={`
+    bg-white/70 backdrop-blur-xl border border-white/40 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] 
+    rounded-[2.5rem] p-6 transition-all duration-500
+    ${hover ? 'hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.12)] hover:border-white/60 hover:-translate-y-1' : ''}
+    ${className}
+  `}>
+    {children}
   </div>
-));
+);
 
-StatCard.displayName = 'StatCard';
-
-// Memoized Daily Summary Item
-const DailySummaryItem = memo(({ index, employee, record }: { index: number; employee: any; record?: any }) => (
-  <div className="flex items-center justify-between p-3 md:p-4 bg-slate-50 rounded-xl md:rounded-2xl border border-slate-100 hover:bg-white hover:shadow-md transition-all group">
-    <div className="flex items-center gap-2 md:gap-4 flex-1 min-w-0">
-      <span className="text-[9px] md:text-[10px] font-black text-slate-400 w-4 md:w-5 shrink-0">{index}.</span>
-      <div className="w-7 h-7 md:w-8 md:h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center font-black text-[9px] md:text-[10px] group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0">
-        {employee?.name.charAt(0) || 'U'}
+const StatHighlight = ({ label, value, icon: Icon, color, subtext }: { label: string, value: string | number, icon: any, color: string, subtext: string }) => (
+  <GlassCard className="flex flex-col gap-4">
+    <div className="flex items-center justify-between">
+      <div className={`w-12 h-12 rounded-2xl bg-${color}-50 text-${color}-600 flex items-center justify-center shadow-sm`}>
+        <Icon className="w-6 h-6" />
       </div>
-      <p className="text-[11px] md:text-xs font-black text-slate-800 truncate">{employee?.name || 'موظف غير معروف'}</p>
+      <div className="px-3 py-1 bg-slate-50 rounded-full border border-slate-100 italic text-[10px] font-black text-slate-400">
+        LIVE
+      </div>
     </div>
-    
-    <div className="flex items-center gap-3 md:gap-8 text-left shrink-0">
-      <div className="flex flex-col items-start min-w-[50px] md:min-w-[60px]">
-        <span className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase mb-0.5">دخول</span>
-        <p className="text-[10px] md:text-xs font-black text-emerald-600">
-          {record?.checkIn ? format(new Date(record.checkIn), 'HH:mm') : '-'}
+    <div>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+      <div className="flex items-baseline gap-2">
+        <h3 className="text-4xl font-black text-slate-900">{value}</h3>
+      </div>
+      <p className="text-[10px] font-bold text-slate-500 mt-2 flex items-center gap-1.5">
+        <Activity className={`w-3 h-3 text-${color}-500`} /> {subtext}
+      </p>
+    </div>
+  </GlassCard>
+);
+
+const PresenceItem = memo(({ employee, record, type }: { employee: any, record: any, type: 'admin' | 'shift' }) => {
+  const checkInTime = new Date(record.checkIn);
+  const diffMs = Date.now() - checkInTime.getTime();
+  const diffHrs = Math.floor(diffMs / 3600000);
+  const diffMins = Math.floor((diffMs % 3600000) / 60000);
+
+  return (
+    <div className="flex items-center justify-between p-4 bg-white/50 rounded-2xl border border-white/60 hover:bg-white transition-all group">
+      <div className="flex items-center gap-4">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs transition-colors shadow-sm
+          ${type === 'admin' ? 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white' : 'bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white'}`}>
+          {employee?.name.charAt(0)}
+        </div>
+        <div>
+          <p className="text-xs font-black text-slate-800">{employee?.name}</p>
+          <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1">
+            <MapIcon className="w-2.5 h-2.5" /> {employee?.centerId === 'all' ? 'المقر الرئيسي' : 'مركز ميداني'}
+          </p>
+        </div>
+      </div>
+      <div className="text-left">
+        <p className={`text-[10px] font-black ${type === 'admin' ? 'text-emerald-600' : 'text-rose-600'}`}>
+          {format(checkInTime, 'hh:mm a', { locale: ar })}
         </p>
-      </div>
-      <div className="flex flex-col items-start min-w-[50px] md:min-w-[60px]">
-        <span className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase mb-0.5">خروج</span>
-        <p className="text-[10px] md:text-xs font-black text-indigo-600">
-          {record?.checkOut ? format(new Date(record.checkOut), 'HH:mm') : '-'}
-        </p>
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">منذ {diffHrs}س {diffMins}د</p>
       </div>
     </div>
-  </div>
-));
-
-DailySummaryItem.displayName = 'DailySummaryItem';
-
-// Memoized Center Progress Bar
-const CenterProgress = memo(({ center, percentage, records, totalEmps }: {
-  center: any;
-  percentage: number;
-  records: number;
-  totalEmps: number;
-}) => (
-  <div className="space-y-2">
-    <div className="flex items-center justify-between px-2">
-      <span className="text-xs font-black text-slate-700">{center.name}</span>
-      <span className="text-[10px] font-black text-slate-400">{records} / {totalEmps} موظف</span>
-    </div>
-    <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">
-      <div
-        className="h-full bg-indigo-600 transition-all duration-1000"
-        style={{ width: `${percentage}%` }}
-      ></div>
-    </div>
-  </div>
-));
-
-CenterProgress.displayName = 'CenterProgress';
+  );
+});
 
 const Dashboard: React.FC = () => {
-  const { employees, centers, attendance, pendingOperations, requestDataRecovery, currentTime } = useApp();
+  const { employees, centers, attendance, pendingOperations, requestDataRecovery, currentTime, timeOffset } = useApp();
   const today = getTodayDateString(getSyriaDate(currentTime));
 
-  const handleForceSync = async () => {
-    if (window.confirm('سيتم إرسال أمر برفع جميع البيانات المعلقة من هواتف الموظفين الآن. هل تريد المتابعة؟')) {
-      await requestDataRecovery();
-      alert('تم إرسال نداء المزامنة لجميع الأجهزة النشطة.');
-    }
-  };
+  // --- Logic & Data Processing ---
 
-  // Create lookup maps for O(1) access
   const employeeMap = useMemo(() => {
     const map = new Map();
     employees.forEach(e => map.set(e.id, e));
     return map;
   }, [employees]);
 
-  // Filter active centers only
-  const activeCentersList = useMemo(() => centers.filter(c => c.isActive), [centers]);
-  const activeCenterIds = useMemo(() => new Set(activeCentersList.map(c => c.id)), [activeCentersList]);
+  const centerMap = useMemo(() => {
+    const map = new Map();
+    centers.forEach(c => map.set(c.id, c));
+    return map;
+  }, [centers]);
 
-  // Filter employees and records for active centers only
-  const activeEmployees = useMemo(() =>
-    employees.filter(e => activeCenterIds.has(e.centerId)),
-    [employees, activeCenterIds]
-  );
+  const activeCenterIds = useMemo(() => new Set(centers.filter(c => c.isActive).map(c => c.id)), [centers]);
 
-  const todayRecords = useMemo(() =>
-    attendance.filter(a => a.date === today && activeCenterIds.has(a.centerId)),
-    [attendance, today, activeCenterIds]
-  );
+  // Current Presence Logic (The source of truth)
+  const presence = useMemo(() => {
+    const fortyEightHoursAgo = new Date(currentTime.getTime() - (48 * 60 * 60 * 1000));
+    
+    return attendance.filter(a => {
+      if (a.checkOut || !a.checkIn) return false;
+      if (!activeCenterIds.has(a.centerId)) return false;
+      
+      const emp = employeeMap.get(a.employeeId);
+      if (!emp) return false;
 
-  // Currently present = today's records OR any open shift records (checked in, not checked out)
-  const currentlyPresent = useMemo(() => {
-    const todayIds = new Set(todayRecords.map(r => r.employeeId));
-    // Find shift workers with open records from previous days
-    const openShiftRecords = attendance.filter(a => 
-      a.date !== today && 
-      a.checkIn && 
-      !a.checkOut && 
-      activeCenterIds.has(a.centerId)
-    );
-    // Combine: today's records + open shifts not already counted
-    const combined = [...todayRecords];
-    openShiftRecords.forEach(r => {
-      if (!todayIds.has(r.employeeId)) {
-        combined.push(r);
-      }
-    });
-    return combined;
-  }, [attendance, todayRecords, today, activeCenterIds]);
+      const checkInTime = new Date(a.checkIn);
+      const isShift = emp.workType === 'shifts';
 
-  const stats = useMemo(() => {
-    const totalEmps = activeEmployees.length;
-    const adminCount = currentlyPresent.filter(r => employeeMap.get(r.employeeId)?.workType === 'administrative').length;
-    const shiftCount = currentlyPresent.filter(r => employeeMap.get(r.employeeId)?.workType === 'shifts').length;
-    const lateToday = todayRecords.filter(a => a.status === 'late').length;
-    const activeCentersCount = activeCentersList.length;
+      // Admin must be today, Shiit within 48h
+      if (isShift) return checkInTime > fortyEightHoursAgo;
+      return a.date === today;
+    }).map(a => ({
+      ...a,
+      employee: employeeMap.get(a.employeeId)
+    }));
+  }, [attendance, today, activeCenterIds, employeeMap, currentTime]);
 
-    return [
-      { label: 'إجمالي الموظفين (النشطين)', value: totalEmps, icon: Users, color: 'indigo', trend: 'القوة الميدانية حالياً' },
-      { label: 'إداريين متواجدين', value: adminCount, icon: UserCheck, color: 'emerald', trend: 'المقر الرئيسي والمراكز' },
-      { label: 'مناوبين متواجدين', value: shiftCount, icon: Activity, color: 'rose', trend: 'المناوبات الجارية حالياً' },
-      { label: 'المراكز النشطة', value: activeCentersCount, icon: Building2, color: 'blue', trend: 'تعمل حالياً' },
-    ];
-  }, [activeEmployees, activeCentersList, todayRecords, currentlyPresent, employeeMap]);
+  const adminsPresent = useMemo(() => presence.filter(p => p.employee?.workType === 'administrative'), [presence]);
+  const shiftsPresent = useMemo(() => presence.filter(p => p.employee?.workType === 'shifts'), [presence]);
 
-  // Pie chart data - active centers only
-  const pieData = useMemo(() => {
-    const late = todayRecords.filter(a => a.status === 'late').length;
-    const onTime = todayRecords.filter(a => a.status === 'present').length;
-    const absent = Math.max(0, activeEmployees.length - todayRecords.length);
+  // Discipline Alerts
+  const alerts = useMemo(() => {
+    const list: { type: 'late' | 'missing_checkout' | 'system', title: string, sub: string, priority: 'high' | 'med' }[] = [];
+    
+    // Late today
+    const lateCount = attendance.filter(a => a.date === today && a.status === 'late').length;
+    if (lateCount > 0) {
+      list.push({ type: 'late', title: `${lateCount} تأخير اليوم`, sub: 'يتطلب متابعة مع مدراء المراكز', priority: 'med' });
+    }
 
-    return [
-      { name: 'منضبط', value: onTime, color: '#10b981' },
-      { name: 'متأخر', value: late, color: '#f59e0b' },
-      { name: 'غائب', value: absent, color: '#ef4444' },
-    ];
-  }, [todayRecords, activeEmployees]);
+    // Auto-closed recently (simulated/tracked via notes)
+    const autoClosed = attendance.filter(a => a.notes?.includes('إغلاق آلي') && (isToday(new Date(a.date)) || isYesterday(new Date(a.date)))).length;
+    if (autoClosed > 0) {
+      list.push({ type: 'missing_checkout', title: `${autoClosed} نسيان بصمة خروج`, sub: 'تم إغلاق السجلات آلياً مع الخصم', priority: 'high' });
+    }
 
-  const weeklyData = useMemo(() => {
+    return list;
+  }, [attendance, today]);
+
+  // Center Coverage Health
+  const centerHealth = useMemo(() => {
+    return centers.filter(c => c.isActive).map(center => {
+      const centerEmps = employees.filter(e => e.centerId === center.id).length;
+      const centerPresent = presence.filter(p => p.centerId === center.id).length;
+      const health = centerEmps > 0 ? (centerPresent / centerEmps) * 100 : 0;
+      return { center, centerEmps, centerPresent, health };
+    }).sort((a, b) => a.health - b.health); // Show low coverage centers first
+  }, [centers, employees, presence]);
+
+  // Weekly Trend
+  const weeklyTrend = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
-      const d = getSyriaDate();
-      d.setDate(d.getDate() - (6 - i));
-      const date = format(d, 'yyyy-MM-dd');
-      const count = attendance.filter(a => a.date === date && activeCenterIds.has(a.centerId)).length;
+      const d = subDays(getSyriaDate(currentTime), 6 - i);
+      const dateStr = format(d, 'yyyy-MM-dd');
+      const count = attendance.filter(a => a.date === dateStr).length;
       return {
         name: format(d, 'EEE', { locale: ar }),
-        count: count
+        count
       };
     });
-  }, [attendance, activeCenterIds]);
-
-  // Daily Summary (List of all employees and their movements for today)
-  const dailySummary = useMemo(() => {
-    const summary: { employee: any; record?: any; latestTime?: number }[] = [];
-    
-    activeEmployees.forEach(emp => {
-      const empRecords = todayRecords
-        .filter(r => r.employeeId === emp.id)
-        .sort((a, b) => new Date(a.checkIn!).getTime() - new Date(b.checkIn!).getTime());
-        
-      if (empRecords.length === 0) {
-        summary.push({ employee: emp, latestTime: 0 }); // No activity = bottom
-      } else {
-        empRecords.forEach(rec => {
-          const time = new Date(rec.checkOut || rec.checkIn!).getTime();
-          summary.push({ employee: emp, record: rec, latestTime: time });
-        });
-      }
-    });
-
-    // Sort: Latest activity first, then by name for those with same activity status
-    return summary.sort((a, b) => {
-      if ((b.latestTime || 0) !== (a.latestTime || 0)) {
-        return (b.latestTime || 0) - (a.latestTime || 0);
-      }
-      return a.employee.name.localeCompare(b.employee.name, 'ar');
-    });
-  }, [activeEmployees, todayRecords]);
-
-  // Registered employees count for the header
-  const registeredCount = useMemo(() => {
-    const uniqueIds = new Set(todayRecords.map(r => r.employeeId));
-    return uniqueIds.size;
-  }, [todayRecords]);
-
-  // Center statistics for progress bars
-  const centerStats = useMemo(() =>
-    activeCentersList.map(center => {
-      const centerRecords = todayRecords.filter(r => r.centerId === center.id).length;
-      const centerEmps = employees.filter(e => e.centerId === center.id).length;
-      const percentage = centerEmps > 0 ? (centerRecords / centerEmps) * 100 : 0;
-      return { center, centerRecords, centerEmps, percentage };
-    }),
-    [activeCentersList, todayRecords, employees]
-  );
+  }, [attendance, currentTime]);
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-1000">
-      {/* Header Welcome */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+    <div className="space-y-8 animate-in fade-in duration-1000 pb-20">
+      
+      {/* Top Navigation & Status Bar */}
+      <div className="flex flex-col xl:flex-row gap-6">
+        {/* Welcome & Global Sync */}
+        <GlassCard className="flex-1 flex flex-col md:flex-row items-center justify-between gap-6" hover={false}>
           <div className="flex items-center gap-6">
-            <div className="w-16 h-16 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl shadow-indigo-200">
+            <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-3xl flex items-center justify-center text-white shadow-xl shadow-indigo-200 ring-4 ring-indigo-50">
               <Zap className="w-8 h-8 fill-current" />
             </div>
             <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">مرحباً بك في لوحة التحكم الذكية</h2>
-                {pendingOperations > 0 && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-100 rounded-full">
-                    <Loader2 className="w-3 h-3 text-amber-600 animate-spin" />
-                    <span className="text-[9px] font-black text-amber-600 uppercase">{pendingOperations} معلق</span>
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight">غرفة العمليات المركزية</h1>
+              <div className="flex items-center gap-2 text-slate-500 font-bold text-sm mt-1">
+                <CalendarDays className="w-4 h-4 text-indigo-500" />
+                <span>{format(currentTime, 'EEEE, dd MMMM yyyy', { locale: ar })}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className={`px-4 py-2 rounded-2xl border flex items-center gap-3 transition-colors
+              ${pendingOperations > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+              <div className={`w-2 h-2 rounded-full ${pendingOperations > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></div>
+              <span className={`text-[10px] font-black uppercase tracking-widest ${pendingOperations > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                {pendingOperations > 0 ? `بانتظار مزامنة ${pendingOperations} سجلات` : 'النظام متزامن بالكامل'}
+              </span>
+            </div>
+            <button 
+              onClick={() => requestDataRecovery()}
+              className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm group active:scale-95"
+              title="تحديث البيانات من الأجهزة"
+            >
+              <RefreshCcw className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-colors" />
+            </button>
+          </div>
+        </GlassCard>
+
+        {/* Dynamic Alerts */}
+        <div className="xl:w-[400px] flex flex-col gap-3">
+          {alerts.length > 0 ? alerts.map((alert, i) => (
+            <div key={i} className={`flex items-center gap-4 p-4 rounded-3xl border animate-in slide-in-from-right duration-500 delay-${i * 100}
+              ${alert.priority === 'high' ? 'bg-rose-50 border-rose-100 text-rose-800' : 'bg-amber-50 border-amber-100 text-amber-800'}`}>
+              <div className={`w-10 h-10 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-sm
+                ${alert.priority === 'high' ? 'text-rose-500' : 'text-amber-500'}`}>
+                {alert.type === 'missing_checkout' ? <AlertCircle className="w-5 h-5" /> : <Clock8 className="w-5 h-5" />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-black truncate">{alert.title}</p>
+                <p className="text-[10px] font-bold opacity-70 truncate">{alert.sub}</p>
+              </div>
+              <ArrowUpRight className="w-4 h-4 ml-auto opacity-40" />
+            </div>
+          )) : (
+            <div className="flex items-center gap-4 p-4 bg-emerald-50 border border-emerald-100 rounded-3xl text-emerald-800">
+              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shrink-0 text-emerald-500 shadow-sm">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-black">كل شيء تحت السيطرة</p>
+                <p className="text-[10px] font-bold opacity-70">لا توجد تنبيهات انضباط حالياً</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Primary Highlights */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatHighlight label="إدارة - متواجدون" value={adminsPresent.length} icon={UserCheck} color="emerald" subtext="بصموا دخول اليوم" />
+        <StatHighlight label="مناوبات - نشطة" value={shiftsPresent.length} icon={Activity} color="rose" subtext="مناوبات ميدانية جارية" />
+        <StatHighlight label="تغطية المراكز" value={`${(centerHealth.reduce((acc, c) => acc + c.health, 0) / (centerHealth.length || 1)).toFixed(0)}%`} icon={Building2} color="indigo" subtext="متوسط نسبة الإشغال" />
+        <StatHighlight label="إجمالي القوة" value={employees.length} icon={Users} color="slate" subtext="موظف مسجل حالياً" />
+      </div>
+
+      {/* Detailed Viewports */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        
+        {/* Live Presence Lists */}
+        <GlassCard className="xl:col-span-2 space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-1.5 h-6 bg-indigo-600 rounded-full"></div>
+              <h3 className="text-lg font-black text-slate-800">قائمة المتواجدين الآن</h3>
+            </div>
+            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-200">
+              <div className="px-3 py-1 text-[10px] font-black text-indigo-600 bg-white rounded-lg shadow-sm">الميداني</div>
+              <div className="px-3 py-1 text-[10px] font-black text-slate-400">الإحصائي</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Admin Column */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">الموظفين الإداريين ({adminsPresent.length})</span>
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+              </div>
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                {adminsPresent.length > 0 ? adminsPresent.map((p, i) => (
+                  <PresenceItem key={p.id} employee={p.employee} record={p} type="admin" />
+                )) : (
+                  <div className="py-10 text-center opacity-30">
+                    <UserMinus className="w-10 h-10 mx-auto mb-2" />
+                    <p className="text-xs font-bold">لا يوجد إداريين</p>
                   </div>
                 )}
               </div>
-              <p className="text-slate-500 font-bold text-sm">نظرة عامة على حالة الانضباط (للمراكز النشطة فقط)</p>
             </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={handleForceSync}
-              className="flex items-center gap-2 bg-indigo-50 text-indigo-600 px-4 py-3 rounded-2xl border border-indigo-100 font-black text-[10px] hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95"
-              title="طلب مزامنة فورية من جميع هواتف الموظفين"
-            >
-              <RefreshCcw className="w-4 h-4" />
-              <span>نداء المزامنة الشامل</span>
-            </button>
-            {attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed').length > 0 && (
-              <div className="flex items-center gap-2 bg-rose-50 px-4 py-2 rounded-xl border border-rose-100 border-dashed animate-pulse">
-                <WifiOff className="w-4 h-4 text-rose-500" />
-                <span className="text-[10px] font-black text-rose-600 uppercase">
-                  {attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed').length} سجلات غير مزامنة
-                </span>
-              </div>
-            )}
-            <div className="flex items-center gap-3 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100">
-              <CalendarDays className="w-5 h-5 text-indigo-600" />
-              <span className="text-slate-700 font-black text-xs">{format(currentTime, 'dd MMMM yyyy', { locale: ar })}</span>
-            </div>
-          </div>
-        </div>
 
-      {/* Primary Metrics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-        {stats.map((stat, i) => (
-          <StatCard key={i} stat={stat} index={i} />
-        ))}
+            {/* Shift Column */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">مناوبات الميدان ({shiftsPresent.length})</span>
+                <span className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse"></span>
+              </div>
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                {shiftsPresent.length > 0 ? shiftsPresent.map((p, i) => (
+                  <PresenceItem key={p.id} employee={p.employee} record={p} type="shift" />
+                )) : (
+                  <div className="py-10 text-center opacity-30">
+                    <Activity className="w-10 h-10 mx-auto mb-2" />
+                    <p className="text-xs font-bold">لا توجد مناوبات</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+
+        {/* Center Health Coverage */}
+        <div className="space-y-6">
+          <GlassCard className="h-full space-y-6">
+             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-1.5 h-6 bg-emerald-600 rounded-full"></div>
+                <h3 className="text-lg font-black text-slate-800">تغطية المراكز</h3>
+              </div>
+            </div>
+            
+            <div className="space-y-5 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
+              {centerHealth.map(({ center, centerEmps, centerPresent, health }) => (
+                <div key={center.id} className="space-y-2">
+                  <div className="flex items-center justify-between px-1 text-[11px] font-black">
+                    <span className="text-slate-700">{center.name}</span>
+                    <span className={health < 50 ? 'text-rose-600' : 'text-slate-400'}>
+                      {centerPresent} / {centerEmps} {health < 50 && '⚠️'}
+                    </span>
+                  </div>
+                  <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+                    <div
+                      className={`h-full transition-all duration-1000 ${health < 50 ? 'bg-rose-500' : health < 80 ? 'bg-indigo-500' : 'bg-emerald-500'}`}
+                      style={{ width: `${health}%` }}
+                    ></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+        </div>
       </div>
 
-      {/* Visual Analytics Row */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        {/* Weekly Trend (2/3 width) */}
-        <div className="xl:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-10">
-            <div>
-              <h3 className="text-xl font-black text-slate-900 tracking-tight">نشاط الحضور الأسبوعي</h3>
-              <p className="text-xs text-slate-400 font-bold mt-1">تطور عدد الموظفين الحاضرين في المراكز النشطة</p>
-            </div>
-            <div className="px-4 py-2 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-xl border border-indigo-100 uppercase tracking-widest">
-              Active Scope
-            </div>
+      {/* Analytics Row */}
+      <GlassCard className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="flex items-center gap-3">
+            <TrendingUp className="w-5 h-5 text-indigo-600" />
+            <h3 className="text-lg font-black text-slate-800 tracking-tight">تريند الحضور الأسبوعي</h3>
           </div>
-          <div className="h-[300px] w-full">
+          <div className="h-[250px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={weeklyData}>
+              <AreaChart data={weeklyTrend}>
                 <defs>
                   <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15} />
@@ -298,111 +348,74 @@ const Dashboard: React.FC = () => {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }} />
-                <Tooltip
-                  contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }}
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 900 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 900 }} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                  labelStyle={{ fontWeight: 900, fontSize: '12px' }}
                 />
-                <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={4} fillOpacity={1} fill="url(#colorCount)" />
+                <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorCount)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Status Distribution (1/3 width) */}
-        <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col">
-          <h3 className="text-xl font-black text-slate-900 tracking-tight mb-2">توزيع الحالات اليوم</h3>
-          <p className="text-xs text-slate-400 font-bold mb-8">نسبة الالتزام اللحظية للكوادر النشطة</p>
-
-          <div className="h-[250px] w-full relative mb-6">
-            <ResponsiveContainer width="100%" height="100%">
+        <div className="space-y-6 border-r border-slate-100 pr-0 lg:pr-10">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="w-5 h-5 text-indigo-600" />
+            <h3 className="text-lg font-black text-slate-800 tracking-tight">توزيع الحالة</h3>
+          </div>
+          <div className="h-[200px]">
+             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
+                  data={[
+                    { name: 'منضبط', value: adminsPresent.length + shiftsPresent.length, color: '#10b981' },
+                    { name: 'متأخر', value: attendance.filter(a => a.date === today && a.status === 'late').length, color: '#f59e0b' },
+                    { name: 'غائب', value: Math.max(0, employees.length - (adminsPresent.length + shiftsPresent.length)), color: '#f1f5f9' },
+                  ]}
                   innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={8}
+                  outerRadius={80}
+                  paddingAngle={5}
                   dataKey="value"
                 >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
+                  {[0,1,2].map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={['#10b981', '#f59e0b', '#f1f5f9'][index]} />
                   ))}
                 </Pie>
                 <Tooltip />
               </PieChart>
             </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-3xl font-black text-slate-900">{todayRecords.length}</span>
-              <span className="text-[10px] text-slate-400 font-black uppercase">سجل اليوم</span>
+          </div>
+          <div className="flex flex-wrap gap-4 justify-center">
+            <div className="flex items-center gap-1.5 text-[10px] font-black text-emerald-600">
+              <div className="w-2 h-2 bg-emerald-500 rounded-full"></div> منضبط
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] font-black text-amber-600">
+              <div className="w-2 h-2 bg-amber-500 rounded-full"></div> متأخر
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] font-black text-slate-400">
+              <div className="w-2 h-2 bg-slate-300 rounded-full"></div> متوقع غياب
             </div>
           </div>
-
-          <div className="space-y-3 mt-auto">
-            {pieData.map((item, i) => (
-              <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
-                  <span className="text-xs font-black text-slate-700">{item.name}</span>
-                </div>
-                <span className="text-xs font-black text-slate-900">{item.value} موظف</span>
-              </div>
-            ))}
-          </div>
         </div>
-      </div>
+      </GlassCard>
 
-      {/* Recent Activity & Centers Overview */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-        {/* Recent Logs (Filtered for Active Centers) */}
-        <div className="bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm flex flex-col h-[400px] md:h-[500px]">
-          <div className="flex items-center justify-between mb-6 md:mb-8 shrink-0">
-            <h3 className="text-lg md:text-xl font-black text-slate-900 tracking-tight">سجل حركات اليوم</h3>
-            <div className="flex items-center gap-2">
-              <div className="px-2 py-1 bg-emerald-50 border border-emerald-100 rounded-lg text-[8px] md:text-[9px] font-black text-emerald-600 uppercase tracking-widest whitespace-nowrap">
-                {registeredCount} / {activeEmployees.length} مسجل
-              </div>
-              <Activity className="w-3.5 h-3.5 md:w-4 md:h-4 text-slate-300" />
-            </div>
-          </div>
-          <div className="space-y-2 md:space-y-3 overflow-y-auto pr-1 md:pr-2 custom-scrollbar flex-1">
-            {dailySummary.map((item, i) => (
-              <DailySummaryItem
-                key={item.record?.id || `no-rec-${item.employee.id}`}
-                index={i + 1}
-                employee={item.employee}
-                record={item.record}
-              />
-            ))}
-            {dailySummary.length === 0 && (
-              <div className="py-20 text-center text-slate-300 font-bold italic text-sm">لا توجد سجلات للمراكز النشطة اليوم</div>
-            )}
-          </div>
-        </div>
-
-        {/* Centers Overview (Active Centers Only) */}
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-black text-slate-900 tracking-tight">حالة المراكز الميدانية النشطة</h3>
-            <MapIcon className="w-5 h-5 text-slate-300" />
-          </div>
-          <div className="space-y-4">
-            {centerStats.map((item, i) => (
-              <CenterProgress
-                key={item.center.id || i}
-                center={item.center}
-                percentage={item.percentage}
-                records={item.centerRecords}
-                totalEmps={item.centerEmps}
-              />
-            ))}
-            {activeCentersList.length === 0 && (
-              <div className="py-10 text-center text-slate-400 font-bold italic">جميع المراكز متوقفة حالياً</div>
-            )}
-          </div>
-        </div>
-      </div>
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #e2e8f0;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #cbd5e1;
+        }
+      `}</style>
     </div>
   );
 };
