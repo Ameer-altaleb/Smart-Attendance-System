@@ -169,11 +169,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         
         // Attendance: only fetch recent history to avoid loading thousands of old records
         if (tableName === 'attendance') {
-          // Only fetch TODAY's records to minimize bandwidth
-          // Reports page fetches historical data on demand when user selects date range
+          // Fetch TODAY's records + any OPEN records (no checkOut) regardless of date
+          // This ensures shift workers can check out even if they checked in yesterday
           const today = new Date(Date.now() + timeOffset);
           const todayStr = today.toISOString().split('T')[0];
-          query = query.gte('date', todayStr);
+          query = query.or(`date.gte.${todayStr},check_out.is.null`);
         }
         return await query;
       });
