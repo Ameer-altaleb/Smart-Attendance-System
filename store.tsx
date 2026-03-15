@@ -409,93 +409,81 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [executeDbOperation]);
 
   const addAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
-    // 1. Permanent Audit Log - Immediate write to unbreakable local storage
+    // 1. Permanent Audit Log
     try {
       const rawAudit = localStorage.getItem('attendance_audit_log');
       const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
-      // Prevent duplicates in audit log
-      if (!auditLog.some((item: AttendanceRecord) => item.id === r.id)) {
+      const existingIdx = auditLog.findIndex((item: AttendanceRecord) => item.id === r.id);
+      if (existingIdx >= 0) {
+        auditLog[existingIdx] = { ...auditLog[existingIdx], ...r, syncStatus: 'synced' };
+      } else {
         auditLog.push({ ...r, syncStatus: 'synced' });
-        localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
       }
+      localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
     } catch (e) {
-      console.error('CRITICAL: Failed to write to Permanent Audit Log', e);
+      console.error('Audit Log failed', e);
     }
 
-    // 2. Also write to IndexedDB for Service Worker background sync
+    // 2. IndexedDB Sync Queue
     try {
       await writeToSyncQueue(r);
     } catch (e) {
-      console.warn('[IDB] Failed to write to IndexedDB sync queue', e);
+      console.warn('[IDB] Sync Queue failed', e);
     }
 
-    // 3. Optimistic UI Update - Show success to employee immediately
-    const recordWithStatus = { ...r, syncStatus: 'pending' as const };
+    // 3. Optimistic UI Update - Merge with existing to support independent In/Out
     setAttendance(prev => {
-      if (prev.some(item => item.id === r.id)) return prev;
-      return [...prev, recordWithStatus];
+      const existing = prev.find(item => item.id === r.id);
+      if (existing) {
+        return prev.map(item => item.id === r.id ? { ...item, ...r, syncStatus: 'pending' as const } : item);
+      }
+      return [...prev, { ...r, syncStatus: 'pending' as const }];
     });
 
-    // 4. Immediate Sync with 3 retries (non-blocking but tracked)
+    // 4. Immediate Sync
     if (navigator.onLine && supabase) {
       const { syncStatus: _s, ...dbRecord } = r;
-      console.log(`[Sync] 🔄 Attempting immediate sync for record ${r.id}...`);
-
       let syncSuccess = false;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           const { error } = await supabase.from('attendance').upsert(dbRecord);
           if (!error) {
-            console.log(`[Sync] ✅ Record ${r.id} synced on attempt ${attempt}`);
             setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
-            // Remove from IndexedDB sync queue
-            try { await removeFromSyncQueue(r.id); } catch (_e) { /* ignore */ }
+            try { await removeFromSyncQueue(r.id); } catch (_e) {}
             syncSuccess = true;
             break;
-          } else {
-            console.error(`[Sync] ❌ Attempt ${attempt}/3 failed for ${r.id}:`, JSON.stringify(error));
           }
         } catch (err) {
-          console.error(`[Sync] ❌ Attempt ${attempt}/3 threw for ${r.id}:`, err);
+          console.error('Sync attempt failed', err);
         }
-        // Wait before retrying (1s, 2s, 4s)
-        if (attempt < 3) {
-          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
-        }
+        if (attempt < 3) await new Promise(res => setTimeout(res, 1000 * attempt));
       }
-
       if (!syncSuccess) {
-        console.error(`[Sync] ❌❌ All 3 attempts failed for record ${r.id} — marking as failed, will retry in background`);
         setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
       }
-    } else {
-      console.warn(`[Sync] Offline or Supabase unavailable — record ${r.id} will sync later`);
     }
-
-    // 5. Register Background Sync if available
-    if ('serviceWorker' in navigator && 'SyncManager' in window) {
-      try {
-        const registration = await navigator.serviceWorker.ready;
-        await (registration as any).sync.register('sync-attendance');
-      } catch (e) {
-        console.warn('[PWA] Background sync registration failed', e);
-      }
-    }
-
-    return true; // Always return true because data is secured in Audit Log + IndexedDB
+    return true;
   }, []);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
-    // 1. Optimistic Update
+    // Audit & Queue (for robustness)
+    try {
+      await writeToSyncQueue(r);
+      const rawAudit = localStorage.getItem('attendance_audit_log');
+      const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
+      const existingIdx = auditLog.findIndex((item: AttendanceRecord) => item.id === r.id);
+      if (existingIdx >= 0) {
+        auditLog[existingIdx] = { ...auditLog[existingIdx], ...r, syncStatus: 'synced' };
+        localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
+      }
+    } catch (e) {}
+
+    // 1. Optimistic Update - Merge fields
     setAttendance(prev => prev.map(item => 
-      item.id === r.id ? { ...r, syncStatus: 'pending' as const } : item
+      item.id === r.id ? { ...item, ...r, syncStatus: 'pending' as const } : item
     ));
 
-    // 2. Prepare for DB
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { syncStatus, ...dbRecord } = r;
-
-    // 4. Sync and wait for DB result
     const success = await executeDbOperation('attendance',
       () => supabase!.from('attendance').upsert(dbRecord)
     );
