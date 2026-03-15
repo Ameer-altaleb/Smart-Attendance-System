@@ -34,9 +34,19 @@ export async function writeToSyncQueue(record: any): Promise<void> {
     const store = tx.objectStore(STORE_NAME);
     // Strip syncStatus before storing
     const { syncStatus: _s, ...cleanRecord } = record;
-    store.put(cleanRecord);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    
+    // Merge with existing record to preserve checkIn when adding checkOut while offline
+    const getReq = store.get(cleanRecord.id);
+    getReq.onsuccess = () => {
+      let finalRecord = cleanRecord;
+      if (getReq.result) {
+        finalRecord = { ...getReq.result, ...cleanRecord };
+      }
+      const putReq = store.put(finalRecord);
+      putReq.onsuccess = () => resolve();
+      putReq.onerror = () => reject(putReq.error);
+    };
+    getReq.onerror = () => reject(getReq.error);
   });
 }
 
