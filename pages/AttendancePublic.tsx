@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { useApp } from '../store.tsx';
+import { useApp, generateDeterministicUUID } from '../store.tsx';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import {
@@ -245,10 +245,11 @@ const AttendancePublic: React.FC = () => {
       }
 
       const today = format(currentSyncedTime, 'yyyy-MM-dd');
-      const deterministicId = `${today}_${selectedEmployeeId}`;
+      const oldDeterministicId = `${today}_${selectedEmployeeId}`;
+      const deterministicId = generateDeterministicUUID(oldDeterministicId);
 
-      // العثور على أحدث سجل للموظف في الواجهة المحلية
-      const recentRecord = attendance.find(a => a.id === deterministicId);
+      // العثور على أحدث سجل للموظف في الواجهة المحلية (ندعم المعرف القديم والجديد للاستمرارية)
+      const recentRecord = attendance.find(a => a.id === deterministicId || a.id === oldDeterministicId);
 
       const isShiftWorker = localEmployee.workType === 'shifts';
       const hasOpenRecord = recentRecord && recentRecord.checkIn && !recentRecord.checkOut;
