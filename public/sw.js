@@ -18,6 +18,9 @@ function openDb() {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
       }
+      if (!db.objectStoreNames.contains('config')) {
+        db.createObjectStore('config', { keyPath: 'key' });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -117,25 +120,68 @@ async function syncAttendance() {
   console.log('[SW] Attempting background sync via IndexedDB...');
 
   try {
+    const db = await openDb();
+    
+    // 1. Get Config
+    const configRecords = await new Promise((resolve, reject) => {
+      const tx = db.transaction('config', 'readonly');
+      const store = tx.objectStore('config');
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+
+    const config = {};
+    configRecords.forEach(r => config[r.key] = r.value);
+
+    // 2. Get Records
     const records = await getAllFromSyncQueue();
 
     if (records.length === 0) {
       console.log('[SW] No records in sync queue');
-      // Still notify main thread to check localStorage-based records
       await notifyClients();
       return;
     }
 
     console.log(`[SW] Found ${records.length} records to sync from IndexedDB`);
 
-    // Try to get Supabase URL and key from a cached config
-    // Since we can't access env vars, we'll try to notify the main thread
-    // The main thread has the Supabase client and can do the actual sync
+    if (config.supabase_url && config.supabase_key) {
+      const baseUrl = config.supabase_url.endsWith('/') ? config.supabase_url.slice(0, -1) : config.supabase_url;
+      const apiUrl = `${baseUrl}/rest/v1/attendance`;
+      
+      for (const record of records) {
+        try {
+          // Prepare clean record (remove any frontend-only fields)
+          const { syncStatus: _s, ...dbRecord } = record;
+          
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'apikey': config.supabase_key,
+              'Authorization': `Bearer ${config.supabase_key}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'resolution=merge-duplicates'
+            },
+            body: JSON.stringify(dbRecord)
+          });
+
+          if (response.ok) {
+            console.log(`[SW] Successfully synced record ${record.id}`);
+            await removeFromSyncQueue(record.id);
+          } else {
+            console.error(`[SW] Failed to sync record ${record.id}:`, response.statusText);
+          }
+        } catch (recordErr) {
+          console.error(`[SW] Network error syncing record ${record.id}:`, recordErr);
+        }
+      }
+    }
+
+    // Still notify main thread to refresh its state
     await notifyClients();
 
   } catch (err) {
     console.error('[SW] Background sync failed:', err);
-    // Fall back to notifying main thread
     await notifyClients();
   }
 }
