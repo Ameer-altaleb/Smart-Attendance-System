@@ -278,21 +278,12 @@ const AttendancePublic: React.FC = () => {
           longitude: userLocation?.lon
         };
 
-        setMessage({ text: 'جاري تأمين البصمة في النظام، يرجى الانتظار...', type: 'success' });
-        const startTime = Date.now();
         const success = await addAttendance(record);
-        const elapsedTime = Date.now() - startTime;
-        if (elapsedTime < 4000) await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
 
         if (success) {
           const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
           setMessage({
-            text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح') + ' (تم الحفظ في النظام)',
-            type: 'success'
-          });
-        } else {
-          setMessage({
-            text: 'تم تأمين البصمة على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.',
+            text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح'),
             type: 'success'
           });
         }
@@ -323,21 +314,12 @@ const AttendancePublic: React.FC = () => {
           notes: !recentRecord?.checkIn ? 'بصمة خروج بدون بصمة دخول محلية' : undefined
         };
 
-        setMessage({ text: 'جاري تأمين بصمة الخروج في النظام، يرجى الانتظار...', type: 'success' });
-        const startTime = Date.now();
         const success = await updateAttendance(updatedRecord);
-        const elapsedTime = Date.now() - startTime;
-        if (elapsedTime < 4000) await new Promise(resolve => setTimeout(resolve, 4000 - elapsedTime));
 
         if (success) {
           const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
           setMessage({
-            text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح') + ' (تم الحفظ في النظام)',
-            type: 'success'
-          });
-        } else {
-          setMessage({
-            text: 'تم تأمين انصرافك على جهازك بنجاح. فشل الوصول للسيرفر حالياً، سيتم الرفع تلقائياً عند توفر الإنترنت.',
+            text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح'),
             type: 'success'
           });
         }
@@ -570,12 +552,16 @@ const AttendancePublic: React.FC = () => {
                         {todayRecord?.checkIn && (
                           <div className="absolute top-2 left-2">
                             {todayRecord.syncStatus === 'synced' ? (
-                              <CheckCircle2 className="w-3 h-3 text-emerald-500" title="تمت المزامنة" />
-                            ) : todayRecord.syncStatus === 'pending' ? (
-                              <Loader2 className="w-3 h-3 text-amber-500 animate-spin" title="جاري المزامنة..." />
-                            ) : todayRecord.syncStatus === 'failed' ? (
-                              <AlertTriangle className="w-3 h-3 text-rose-500" title="فشلت المزامنة - سيتم المحاولة لاحقاً" />
-                            ) : null}
+                              <div className="flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+                                <Globe className="w-2.5 h-2.5 text-emerald-600" />
+                                <span className="text-[8px] font-black text-emerald-700">سحابي</span>
+                              </div>
+                            ) : (
+                               <div className="flex items-center gap-1 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20 animate-pulse">
+                                <RefreshCw className="w-2.5 h-2.5 text-amber-600 animate-spin" />
+                                <span className="text-[8px] font-black text-amber-700">محلي</span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -592,13 +578,17 @@ const AttendancePublic: React.FC = () => {
                         </div>
                         {todayRecord?.checkOut && (
                           <div className="absolute top-2 left-2">
-                            {todayRecord.syncStatus === 'synced' ? (
-                              <CheckCircle2 className="w-3 h-3 text-emerald-500" title="تمت المزامنة" />
-                            ) : todayRecord.syncStatus === 'pending' ? (
-                              <Loader2 className="w-3 h-3 text-amber-500 animate-spin" title="جاري المزامنة..." />
-                            ) : todayRecord.syncStatus === 'failed' ? (
-                              <AlertTriangle className="w-3 h-3 text-rose-500" title="فشلت المزامنة - سيتم المحاولة لاحقاً" />
-                            ) : null}
+                             {todayRecord.syncStatus === 'synced' ? (
+                              <div className="flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+                                <Globe className="w-2.5 h-2.5 text-emerald-600" />
+                                <span className="text-[8px] font-black text-emerald-700">سحابي</span>
+                              </div>
+                            ) : (
+                               <div className="flex items-center gap-1 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20 animate-pulse">
+                                <RefreshCw className="w-2.5 h-2.5 text-amber-600 animate-spin" />
+                                <span className="text-[8px] font-black text-amber-700">محلي</span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
