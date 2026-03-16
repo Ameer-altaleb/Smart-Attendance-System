@@ -136,15 +136,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const result = await withRetry(async () => await operation());
         const error = result?.error;
         success = !error;
-        if (error) console.error(`[DB] Error in ${tableName}:`, JSON.stringify(error));
+        if (error) {
+          console.error(`[DB] Error in ${tableName}:`, JSON.stringify(error));
+          try {
+            const logs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
+            logs.push({ t: new Date().toISOString(), table: tableName, error: error });
+            localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
+          } catch (e) {}
+        }
       } else {
         console.warn(`[DB] Supabase not configured, skipping ${tableName} operation`);
       }
       onComplete?.(success);
       updatePendingOps(tableName, -1);
       return success;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`[DB] Execution error in ${tableName}:`, error);
+      try {
+        const logs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
+        logs.push({ t: new Date().toISOString(), table: tableName, error: error?.message || String(error) });
+        localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
+      } catch (e) {}
       onComplete?.(false);
       updatePendingOps(tableName, -1);
       return false;
@@ -439,22 +451,48 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       // Even if local fails, we try to continue
     }
 
-    // 2. Simultaneous Cloud Sync (Fire and forget, but tracked)
-    if (navigator.onLine && supabase) {
+    // 2. Simultaneous Cloud Sync
+    const performSync = async () => {
+      if (!supabase) return;
+      
       const { syncStatus: _s, ...dbRecord } = r;
-      // We don't 'await' the result here for the function return, but we handle its outcome
-      supabase.from('attendance').upsert(dbRecord).then(({ error }) => {
-        if (!error) {
-          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
-          removeFromSyncQueue(r.id).catch(() => {});
-        } else {
-          console.error('[Store] Cloud sync failed:', error);
-          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
-        }
-      });
-    }
+      try {
+        // Add a 10-second timeout to the request
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Sync Timeout (10s)')), 10000)
+        );
 
-    // We return true immediately because the "Operation" of punching is done locally
+        const syncPromise = supabase.from('attendance').upsert(dbRecord);
+        
+        await Promise.race([syncPromise, timeoutPromise]).then((result: any) => {
+          const { error } = result;
+          if (!error) {
+            setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
+            removeFromSyncQueue(r.id).catch(() => {});
+          } else {
+            throw error;
+          }
+        });
+      } catch (err: any) {
+        console.error('[Store] Cloud sync failed:', err);
+        setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
+        
+        // Log the error for the user
+        try {
+          const logs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
+          // Avoid duplicate identical logs
+          const lastLog = logs[logs.length - 1];
+          if (!lastLog || lastLog.error !== (err?.message || JSON.stringify(err))) {
+            logs.push({ t: new Date().toISOString(), table: 'attendance_sync', error: err?.message || JSON.stringify(err) });
+            localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
+          }
+        } catch (e) {}
+      }
+    };
+
+    // Always attempt sync, let the error handler catch failures
+    performSync();
+
     return true;
   }, []);
 
