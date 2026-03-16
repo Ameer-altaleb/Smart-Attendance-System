@@ -198,11 +198,15 @@ const Dashboard: React.FC = () => {
               </span>
             </div>
             <button 
-              onClick={() => requestDataRecovery()}
-              className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm group active:scale-95"
-              title="تحديث البيانات من الأجهزة"
+              onClick={() => {
+                requestDataRecovery();
+                alert('تم إرسال أمر استعادة البيانات لكافة الأجهزة النشطة. ستظهر السجلات هنا فور مزامنتها.');
+              }}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2 group active:scale-95"
+              title="سحب البيانات العالقة من هواتف الموظفين"
             >
-              <RefreshCcw className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-colors" />
+              <RefreshCcw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+              <span className="text-[10px] font-black uppercase tracking-tight">سحب البيانات من الأجهزة</span>
             </button>
           </div>
         </GlassCard>
