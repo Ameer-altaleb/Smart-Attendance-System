@@ -14,6 +14,27 @@ import { supabase, checkSupabaseConnection } from './lib/supabase.ts';
 import { storageManager, requestQueue, withRetry, debounce, connectionMonitor } from './utils/performance.ts';
 import { writeToSyncQueue, removeFromSyncQueue, saveConfig } from './utils/syncQueue.ts';
 
+/**
+ * Generates a deterministic UUID based on an input string.
+ * Used to satisfy Database UUID requirements while maintaining deterministic IDs.
+ */
+export const generateDeterministicUUID = (input: string): string => {
+  // Simple but effective deterministic hashing
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0, ch; i < input.length; i++) {
+    ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  
+  const part = (h: number) => (h >>> 0).toString(16).padStart(8, '0');
+  const full = part(h1) + part(h2) + part(h1 ^ h2) + part(h1 & h2);
+  
+  return `${full.slice(0, 8)}-${full.slice(8, 12)}-4${full.slice(13, 16)}-a${full.slice(17, 20)}-${full.slice(20, 32)}`;
+};
+
 interface AppContextType {
   centers: Center[];
   employees: Employee[];
@@ -270,11 +291,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return;
     }
 
-    // Use functional updates to avoid dependency on state
+    // Retrying Notifications
     setNotifications(prevNotifs => {
       const pending = prevNotifs.filter(n => n.syncStatus === 'pending' || n.syncStatus === 'failed');
       if (pending.length > 0) {
-        console.log(`[Sync] Retrying ${pending.length} pending notifications...`);
         pending.forEach(n => {
           const { syncStatus: _s, ...dbRecord } = n;
           executeDbOperation('notifications',
@@ -283,7 +303,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               if (success) {
                 setNotifications(current => current.map(item => item.id === n.id ? { ...item, syncStatus: 'synced' } : item));
               } else {
-                // Mark as failed so the UI can show the failure state
                 setNotifications(current => current.map(item => item.id === n.id ? { ...item, syncStatus: 'failed' } : item));
               }
             }
@@ -293,26 +312,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return prevNotifs;
     });
 
+    // Retrying Attendance with Migration Logic
     setAttendance(prevAttendance => {
       const pending = prevAttendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed');
       if (pending.length > 0) {
-        console.log(`[Sync] ⚠️ Retrying ${pending.length} pending attendance records...`);
+        console.log(`[Sync] ⚠️ Retrying ${pending.length} pending records...`);
         pending.forEach(record => {
-          const { syncStatus: _s, ...dbRecord } = record;
-          console.log(`[Sync] Attempting sync for record ${record.id} (employee: ${record.employeeId}, date: ${record.date})`);
+          let finalId = record.id;
+          // UUID Migration: If ID doesn't look like a UUID, generate one
+          if (!record.id.includes('-') || record.id.split('-').length < 5) {
+            finalId = generateDeterministicUUID(record.id);
+            console.log(`[Sync] Migrating ID for retry: ${record.id} -> ${finalId}`);
+          }
+          
+          const { syncStatus: _s, ...dbRecord } = { ...record, id: finalId };
           executeDbOperation('attendance',
             () => supabase!.from('attendance').upsert(dbRecord),
             (success) => {
               if (success) {
-                console.log(`[Sync] ✅ Record ${record.id} synced successfully`);
-                setAttendance(current => current.map(item =>
-                  item.id === record.id ? { ...item, syncStatus: 'synced' } : item
-                ));
-              } else {
-                console.error(`[Sync] ❌ Record ${record.id} sync FAILED — will retry`);
-                setAttendance(current => current.map(item =>
-                  item.id === record.id ? { ...item, syncStatus: 'failed' } : item
-                ));
+                setAttendance(current => {
+                  if (finalId !== record.id) {
+                    return current.filter(item => item.id !== record.id)
+                      .map(item => item.id === finalId ? { ...item, syncStatus: 'synced' } : item);
+                  }
+                  return current.map(item => item.id === record.id ? { ...item, syncStatus: 'synced' } : item);
+                });
+                removeFromSyncQueue(record.id).catch(() => {});
+                removeFromSyncQueue(finalId).catch(() => {});
               }
             }
           );
@@ -328,61 +354,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!checkSupabaseConnection() || !supabase) return;
 
     try {
-      // Step 1: Check the Permanent Audit Log
       const rawAudit = localStorage.getItem('attendance_audit_log');
       if (!rawAudit) return;
 
-      const auditRecords: AttendanceRecord[] = JSON.parse(rawAudit);
+      let auditRecords: AttendanceRecord[] = JSON.parse(rawAudit);
       if (!Array.isArray(auditRecords) || auditRecords.length === 0) return;
 
-      // Step 2: Only recover records that are NOT currently synced in state
-      // Use functional read to get latest state without dependency
-      let unsyncedFromAudit: AttendanceRecord[] = [];
-      setAttendance(currentState => {
-        const syncedIds = new Set(
-          currentState.filter(a => a.syncStatus === 'synced').map(a => a.id)
-        );
-        unsyncedFromAudit = auditRecords.filter(r => !syncedIds.has(r.id));
-        return currentState; // Don't modify state
-      });
+      // Migration: Convert IDs and de-duplicate
+      let changed = false;
+      const migrateId = (record: AttendanceRecord) => {
+        if (!record.id.includes('-') || record.id.split('-').length < 5) { // Simple UUID check
+          const newId = generateDeterministicUUID(record.id);
+          console.log(`[Store] Migrating ID for recover: ${record.id} -> ${newId}`);
+          changed = true;
+          return { ...record, id: newId };
+        }
+        return record;
+      };
 
+      auditRecords = auditRecords.map(migrateId);
+      if (changed) {
+        localStorage.setItem('attendance_audit_log', JSON.stringify(auditRecords.slice(-1000)));
+      }
+
+      const unsyncedFromAudit = auditRecords.filter(r => r.syncStatus !== 'synced');
       if (unsyncedFromAudit.length === 0) return;
 
-      console.log(`[Audit] Found ${unsyncedFromAudit.length} unsynced records to recover (out of ${auditRecords.length} total)`);
+      console.log(`[Audit] Found ${unsyncedFromAudit.length} unsynced records to recover.`);
 
-      // Step 3: Process in batches of 10 to avoid rate limiting
       const BATCH_SIZE = 10;
-      let successCount = 0;
-
       for (let i = 0; i < unsyncedFromAudit.length; i += BATCH_SIZE) {
         const batch = unsyncedFromAudit.slice(i, i + BATCH_SIZE);
-        const results = await Promise.allSettled(
+        await Promise.allSettled(
           batch.map(async (record) => {
             const { syncStatus: _s, ...dbRecord } = record;
             const { error } = await supabase!.from('attendance').upsert(dbRecord);
-            if (error) throw error;
-            return record.id;
+            if (!error) {
+              setAttendance(prev => prev.map(a => a.id === record.id ? { ...a, syncStatus: 'synced' } : a));
+              removeFromSyncQueue(record.id).catch(() => {});
+            }
           })
         );
-
-        results.forEach((result, idx) => {
-          if (result.status === 'fulfilled') {
-            successCount++;
-            const recordId = result.value;
-            setAttendance(prev => prev.map(a => a.id === recordId ? { ...a, syncStatus: 'synced' } : a));
-          } else {
-            console.error(`[Audit] Sync failed for ${batch[idx].id}:`, result.reason);
-          }
-        });
-
-        // Small delay between batches to avoid rate limiting
-        if (i + BATCH_SIZE < unsyncedFromAudit.length) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-
-      if (successCount > 0) {
-        console.log(`[Audit] ✅ Recovered ${successCount} of ${unsyncedFromAudit.length} records.`);
       }
     } catch (err) {
       console.error('[Audit] Recovery failed:', err);
@@ -455,7 +467,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const performSync = async () => {
       if (!supabase) return;
       
-      const { syncStatus: _s, ...dbRecord } = r;
+      let finalRecord = r;
+      if (!r.id.includes('-') || r.id.split('-').length < 5) {
+        finalRecord = { ...r, id: generateDeterministicUUID(r.id) };
+      }
+
+      const { syncStatus: _s, ...dbRecord } = finalRecord;
       try {
         // Add a 10-second timeout to the request
         const timeoutPromise = new Promise((_, reject) => 
