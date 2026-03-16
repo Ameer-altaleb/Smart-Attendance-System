@@ -312,17 +312,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return prevNotifs;
     });
 
-    // Retrying Attendance with Migration Logic
+    // Retrying Attendance with Robust Migration Logic
     setAttendance(prevAttendance => {
       const pending = prevAttendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed');
       if (pending.length > 0) {
-        console.log(`[Sync] ⚠️ Retrying ${pending.length} pending records...`);
         pending.forEach(record => {
           let finalId = record.id;
-          // UUID Migration: If ID doesn't look like a UUID, generate one
-          if (!record.id.includes('-') || record.id.split('-').length < 5) {
+          // Robust UUID Check: If it has underscore or doesn't match UUID regex, migrate it
+          const isInvalidUUID = record.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(record.id);
+          
+          if (isInvalidUUID) {
             finalId = generateDeterministicUUID(record.id);
-            console.log(`[Sync] Migrating ID for retry: ${record.id} -> ${finalId}`);
+            console.log(`[Sync] CRITICAL MIGRATION: ${record.id} -> ${finalId}`);
           }
           
           const { syncStatus: _s, ...dbRecord } = { ...record, id: finalId };
@@ -360,10 +361,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       let auditRecords: AttendanceRecord[] = JSON.parse(rawAudit);
       if (!Array.isArray(auditRecords) || auditRecords.length === 0) return;
 
-      // Migration: Convert IDs and de-duplicate
+      // Robust Migration: Convert IDs and de-duplicate
       let changed = false;
       const migrateId = (record: AttendanceRecord) => {
-        if (!record.id.includes('-') || record.id.split('-').length < 5) { // Simple UUID check
+        const isInvalidUUID = record.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(record.id);
+        if (isInvalidUUID) {
           const newId = generateDeterministicUUID(record.id);
           console.log(`[Store] Migrating ID for recover: ${record.id} -> ${newId}`);
           changed = true;
@@ -468,7 +470,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (!supabase) return;
       
       let finalRecord = r;
-      if (!r.id.includes('-') || r.id.split('-').length < 5) {
+      const isInvalidUUID = r.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(r.id);
+      if (isInvalidUUID) {
         finalRecord = { ...r, id: generateDeterministicUUID(r.id) };
       }
 
