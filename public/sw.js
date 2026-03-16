@@ -149,10 +149,30 @@ async function syncAttendance() {
       const baseUrl = config.supabase_url.endsWith('/') ? config.supabase_url.slice(0, -1) : config.supabase_url;
       const apiUrl = `${baseUrl}/rest/v1/attendance`;
       
+      const generateDeterministicUUID = (input) => {
+        let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+        for (let i = 0, ch; i < input.length; i++) {
+          ch = input.charCodeAt(i);
+          h1 = Math.imul(h1 ^ ch, 2654435761);
+          h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        const part = (h) => (h >>> 0).toString(16).padStart(8, '0');
+        const full = part(h1) + part(h2) + part(h1 ^ h2) + part(h1 & h2);
+        return `${full.slice(0, 8)}-${full.slice(8, 12)}-4${full.slice(13, 16)}-a${full.slice(17, 20)}-${full.slice(20, 32)}`;
+      };
+
       for (const record of records) {
         try {
-          // Prepare clean record (remove any frontend-only fields)
-          const { syncStatus: _s, ...dbRecord } = record;
+          let finalRecord = record;
+          if (!record.id.includes('-') || record.id.split('-').length < 5) {
+            const newId = generateDeterministicUUID(record.id);
+            finalRecord = { ...record, id: newId };
+            console.log(`[SW] Migrated ID: ${record.id} -> ${newId}`);
+          }
+
+          const { syncStatus: _s, ...dbRecord } = finalRecord;
           
           const response = await fetch(apiUrl, {
             method: 'POST',
