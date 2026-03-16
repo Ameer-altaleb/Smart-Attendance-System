@@ -12,7 +12,7 @@ import {
 } from './constants.tsx';
 import { supabase, checkSupabaseConnection } from './lib/supabase.ts';
 import { storageManager, requestQueue, withRetry, debounce, connectionMonitor } from './utils/performance.ts';
-import { writeToSyncQueue, removeFromSyncQueue } from './utils/syncQueue.ts';
+import { writeToSyncQueue, removeFromSyncQueue, saveConfig } from './utils/syncQueue.ts';
 
 interface AppContextType {
   centers: Center[];
@@ -193,7 +193,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               // 1. It's a new record from the server
               // 2. The existing record is already synced (safe to refresh)
               // 3. The existing record has NO sync status (legacy)
-              if (!existing || existing.syncStatus === 'synced' || !existing.syncStatus) {
+              // 4. The existing record is 'pending' or 'failed' but the SERVER now has it
+              if (!existing || existing.syncStatus === 'synced' || !existing.syncStatus || newItem.id === existing.id) {
                 existingMap.set(newItem.id, { ...newItem, syncStatus: 'synced' });
               }
             });
@@ -409,91 +410,58 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [executeDbOperation]);
 
   const addAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
-    // 1. Permanent Audit Log
+    // 1. Immediate Local Persistence (Synchronous for the user)
     try {
+      // Audit Log
       const rawAudit = localStorage.getItem('attendance_audit_log');
       const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
       const existingIdx = auditLog.findIndex((item: AttendanceRecord) => item.id === r.id);
       if (existingIdx >= 0) {
-        auditLog[existingIdx] = { ...auditLog[existingIdx], ...r, syncStatus: 'synced' };
+        auditLog[existingIdx] = { ...auditLog[existingIdx], ...r };
       } else {
-        auditLog.push({ ...r, syncStatus: 'synced' });
+        auditLog.push(r);
       }
       localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
-    } catch (e) {
-      console.error('Audit Log failed', e);
-    }
 
-    // 2. IndexedDB Sync Queue
-    try {
+      // Sync Queue (IndexedDB)
       await writeToSyncQueue(r);
+
+      // Optimistic UI Update - Merge with existing
+      setAttendance(prev => {
+        const existing = prev.find(item => item.id === r.id);
+        if (existing) {
+          return prev.map(item => item.id === r.id ? { ...item, ...r, syncStatus: 'pending' as const } : item);
+        }
+        return [...prev, { ...r, syncStatus: 'pending' as const }];
+      });
     } catch (e) {
-      console.warn('[IDB] Sync Queue failed', e);
+      console.error('[Store] Local persistence failed:', e);
+      // Even if local fails, we try to continue
     }
 
-    // 3. Optimistic UI Update - Merge with existing to support independent In/Out
-    setAttendance(prev => {
-      const existing = prev.find(item => item.id === r.id);
-      if (existing) {
-        return prev.map(item => item.id === r.id ? { ...item, ...r, syncStatus: 'pending' as const } : item);
-      }
-      return [...prev, { ...r, syncStatus: 'pending' as const }];
-    });
-
-    // 4. Immediate Sync
+    // 2. Simultaneous Cloud Sync (Fire and forget, but tracked)
     if (navigator.onLine && supabase) {
       const { syncStatus: _s, ...dbRecord } = r;
-      let syncSuccess = false;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const { error } = await supabase.from('attendance').upsert(dbRecord);
-          if (!error) {
-            setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
-            try { await removeFromSyncQueue(r.id); } catch (_e) {}
-            syncSuccess = true;
-            break;
-          }
-        } catch (err) {
-          console.error('Sync attempt failed', err);
+      // We don't 'await' the result here for the function return, but we handle its outcome
+      supabase.from('attendance').upsert(dbRecord).then(({ error }) => {
+        if (!error) {
+          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
+          removeFromSyncQueue(r.id).catch(() => {});
+        } else {
+          console.error('[Store] Cloud sync failed:', error);
+          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
         }
-        if (attempt < 3) await new Promise(res => setTimeout(res, 1000 * attempt));
-      }
-      if (!syncSuccess) {
-        setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
-      }
+      });
     }
+
+    // We return true immediately because the "Operation" of punching is done locally
     return true;
   }, []);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
-    // Audit & Queue (for robustness)
-    try {
-      await writeToSyncQueue(r);
-      const rawAudit = localStorage.getItem('attendance_audit_log');
-      const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
-      const existingIdx = auditLog.findIndex((item: AttendanceRecord) => item.id === r.id);
-      if (existingIdx >= 0) {
-        auditLog[existingIdx] = { ...auditLog[existingIdx], ...r, syncStatus: 'synced' };
-        localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
-      }
-    } catch (e) {}
-
-    // 1. Optimistic Update - Merge fields
-    setAttendance(prev => prev.map(item => 
-      item.id === r.id ? { ...item, ...r, syncStatus: 'pending' as const } : item
-    ));
-
-    const { syncStatus, ...dbRecord } = r;
-    const success = await executeDbOperation('attendance',
-      () => supabase!.from('attendance').upsert(dbRecord)
-    );
-
-    setAttendance(prev => prev.map(item => 
-      item.id === r.id ? { ...item, syncStatus: success ? 'synced' : 'failed' } : item
-    ));
-
-    return success;
-  }, [executeDbOperation]);
+    // Exactly the same logic as addAttendance because it uses Upsert on the backend
+    return addAttendance(r);
+  }, [addAttendance]);
 
   const addNotification = useCallback(async (n: Notification) => {
     setNotifications(prev => [...prev, { ...n, syncStatus: 'pending' }]);
@@ -649,6 +617,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await refreshData();
         await retrySync();
         await recoverLocalAttendance();
+        // Save config for SW background sync
+        if (supabase) {
+          saveConfig(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY).catch(() => {});
+        }
         setIsRealtimeConnected(true);
       } else {
         const tables = ['centers', 'employees', 'admins', 'attendance', 'holidays', 'notifications', 'templates', 'settings', 'projects'];
