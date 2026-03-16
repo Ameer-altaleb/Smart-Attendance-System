@@ -166,10 +166,12 @@ async function syncAttendance() {
       for (const record of records) {
         try {
           let finalRecord = record;
-          if (!record.id.includes('-') || record.id.split('-').length < 5) {
+          const isInvalidUUID = record.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(record.id);
+          
+          if (isInvalidUUID) {
             const newId = generateDeterministicUUID(record.id);
             finalRecord = { ...record, id: newId };
-            console.log(`[SW] Migrated ID: ${record.id} -> ${newId}`);
+            console.log(`[SW] CRITICAL MIGRATION: ${record.id} -> ${newId}`);
           }
 
           const { syncStatus: _s, ...dbRecord } = finalRecord;
