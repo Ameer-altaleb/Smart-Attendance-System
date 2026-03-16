@@ -17,6 +17,9 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
       }
+      if (!db.objectStoreNames.contains('config')) {
+        db.createObjectStore('config', { keyPath: 'key' });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -87,6 +90,21 @@ export async function clearSyncQueue(): Promise<void> {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     store.clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/**
+ * Save configuration for Service Worker
+ */
+export async function saveConfig(url: string, key: string): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('config', 'readwrite');
+    const store = tx.objectStore('config');
+    store.put({ key: 'supabase_url', value: url });
+    store.put({ key: 'supabase_key', value: key });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
