@@ -248,6 +248,21 @@ const AttendancePublic: React.FC = () => {
       const oldDeterministicId = `${today}_${selectedEmployeeId}`;
       const deterministicId = generateDeterministicUUID(oldDeterministicId);
 
+      // Robust Local UI Cache update
+      const updateLocalUICache = (time: string, action: 'in' | 'out') => {
+        try {
+          const cacheKey = `ui_cache_${today}_${selectedEmployeeId}`;
+          const existing = JSON.parse(localStorage.getItem(cacheKey) || '{}');
+          if (action === 'in') existing.checkIn = time;
+          else existing.checkOut = time;
+          localStorage.setItem(cacheKey, JSON.stringify(existing));
+          // Clean old caches
+          Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('ui_cache_') && !key.includes(today)) localStorage.removeItem(key);
+          });
+        } catch (e) { }
+      };
+
       // Find newest record for this employee today
       const recentRecord = attendance.find(a => a.id === deterministicId || a.id === oldDeterministicId);
 
@@ -284,6 +299,7 @@ const AttendancePublic: React.FC = () => {
         const success = await addAttendance(record);
 
         if (success) {
+          updateLocalUICache(currentSyncedTime.toISOString(), 'in');
           const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
           setMessage({
             text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح'),
@@ -326,6 +342,7 @@ const AttendancePublic: React.FC = () => {
         const success = await updateAttendance(updatedRecord);
 
         if (success) {
+          updateLocalUICache(now.toISOString(), 'out');
           const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
           setMessage({
             text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح'),
@@ -529,6 +546,22 @@ const AttendancePublic: React.FC = () => {
               {matchedCenter && selectedEmployeeId && (() => {
                 const todayStr = getTodayDateString(currentTime);
                 let todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
+
+                // Try refreshing from Local UI Cache if state is empty
+                if (!todayRecord) {
+                  const cacheKey = `ui_cache_${todayStr}_${selectedEmployeeId}`;
+                  const cached = localStorage.getItem(cacheKey);
+                  if (cached) {
+                    const data = JSON.parse(cached);
+                    todayRecord = { 
+                      id: 'cached', 
+                      employeeId: selectedEmployeeId, 
+                      date: todayStr, 
+                      checkIn: data.checkIn, 
+                      checkOut: data.checkOut 
+                    } as AttendanceRecord;
+                  }
+                }
 
                 // دمج ذكي لموظفي المناوبات: جلب أحدث سجل مفتوح حتى لو كان من يوم سابق
                 const localEmployee = employees.find(e => e.id === selectedEmployeeId);
