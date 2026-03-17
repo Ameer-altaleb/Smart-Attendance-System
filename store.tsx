@@ -8,11 +8,12 @@ import {
   INITIAL_EMPLOYEES,
   INITIAL_HOLIDAYS,
   INITIAL_NOTIFICATIONS,
-  INITIAL_PROJECTS
+  INITIAL_PROJECTS,
+  DRIVE_BRIDGE_URL
 } from './constants.tsx';
 import { supabase, checkSupabaseConnection } from './lib/supabase.ts';
 import { storageManager, requestQueue, withRetry, debounce, connectionMonitor } from './utils/performance.ts';
-import { writeToSyncQueue, removeFromSyncQueue, saveConfig } from './utils/syncQueue.ts';
+import { writeToSyncQueue, removeFromSyncQueue, saveConfig, writeToPermanentAudit, getAllFromPermanentAudit } from './utils/syncQueue.ts';
 
 /**
  * Generates a deterministic UUID based on an input string.
@@ -28,10 +29,10 @@ export const generateDeterministicUUID = (input: string): string => {
   }
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  
+
   const part = (h: number) => (h >>> 0).toString(16).padStart(8, '0');
   const full = part(h1) + part(h2) + part(h1 ^ h2) + part(h1 & h2);
-  
+
   return `${full.slice(0, 8)}-${full.slice(8, 12)}-4${full.slice(13, 16)}-a${full.slice(17, 20)}-${full.slice(20, 32)}`;
 };
 
@@ -76,6 +77,7 @@ interface AppContextType {
   retrySync: () => Promise<void>;
   sendRemoteRefresh: () => Promise<void>;
   requestDataRecovery: () => Promise<void>;
+  importRecordsFromJSON: (file: File) => Promise<{ success: boolean; count: number; error?: string }>;
   timeOffset: number;
   currentTime: Date;
   isTimeSynced: boolean;
@@ -101,13 +103,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [pendingOperations, setPendingOperations] = useState(0);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
-  
+
   // --- Global Time Sync State ---
   const [timeOffset, setTimeOffset] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isTimeSynced, setIsTimeSynced] = useState(false);
 
   const isMounted = useRef(true);
+  const wakeLock = useRef<any>(null);
+
   useEffect(() => {
     return () => { isMounted.current = false; };
   }, []);
@@ -163,7 +167,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const logs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
             logs.push({ t: new Date().toISOString(), table: tableName, error: error });
             localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
-          } catch (e) {}
+          } catch (e) { }
         }
       } else {
         console.warn(`[DB] Supabase not configured, skipping ${tableName} operation`);
@@ -177,7 +181,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const logs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
         logs.push({ t: new Date().toISOString(), table: tableName, error: error?.message || String(error) });
         localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
-      } catch (e) {}
+      } catch (e) { }
       onComplete?.(false);
       updatePendingOps(tableName, -1);
       return false;
@@ -199,7 +203,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const { data, error } = await withRetry(async () => {
         let query = supabase!.from(tableName).select('*');
         if (['employees', 'projects'].includes(tableName)) query = query.is('deleted_at', null);
-        
+
         // Attendance: only fetch recent history to avoid loading thousands of old records
         if (tableName === 'attendance') {
           // Fetch TODAY's records + any OPEN records (no checkOut) regardless of date
@@ -217,11 +221,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         } else if (mergeStrategy === 'merge') {
           setter((prev: any[]) => {
             const existingMap = new Map(prev.map(item => [item.id, item]));
-            
+
             // Step 1: Add or Update records from server
             data.forEach((newItem: any) => {
               const existing = existingMap.get(newItem.id);
-              
+
               // Update if:
               // 1. It's a new record from the server
               // 2. The existing record is already synced (safe to refresh)
@@ -235,7 +239,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             // Note: We no longer delete local records that are missing from 'data'.
             // This prevents data loss due to pagination, RLS, or partial server responses.
             // Records should only be removed via explicit 'DELETE' events from Realtime.
-            
+
             return Array.from(existingMap.values());
           });
         } else {
@@ -278,7 +282,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (tableMap[tableName]) await tableMap[tableName]();
       }
     }, 500)
-  , [fetchTable]);
+    , [fetchTable]);
 
   const refreshData = useCallback(async (tableName?: string) => {
     refreshDataDebounced(tableName);
@@ -320,12 +324,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           let finalId = record.id;
           // Robust UUID Check: If it has underscore or doesn't match UUID regex, migrate it
           const isInvalidUUID = record.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(record.id);
-          
+
           if (isInvalidUUID) {
             finalId = generateDeterministicUUID(record.id);
             console.log(`[Sync] CRITICAL MIGRATION: ${record.id} -> ${finalId}`);
           }
-          
+
           const { syncStatus: _s, ...dbRecord } = { ...record, id: finalId };
           executeDbOperation('attendance',
             () => supabase!.from('attendance').upsert(dbRecord),
@@ -338,8 +342,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                   }
                   return current.map(item => item.id === record.id ? { ...item, syncStatus: 'synced' } : item);
                 });
-                removeFromSyncQueue(record.id).catch(() => {});
-                removeFromSyncQueue(finalId).catch(() => {});
+                removeFromSyncQueue(record.id).catch(() => { });
+                removeFromSyncQueue(finalId).catch(() => { });
               }
             }
           );
@@ -349,25 +353,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   }, [executeDbOperation]);
 
-  // Deep recovery: scan permanent audit log for records missing from DB
-  // Optimized: only syncs records that are NOT confirmed synced in current state
+  // Deep recovery: scan both permanent audit (IndexedDB) and audit log (LocalStorage)
   const recoverLocalAttendance = useCallback(async () => {
     if (!checkSupabaseConnection() || !supabase) return;
 
     try {
+      // Layer 1: IndexedDB Permanent Audit (The Fortress)
+      const idbRecords = await getAllFromPermanentAudit();
+      
+      // Layer 2: LocalStorage Audit Log (The Backup)
       const rawAudit = localStorage.getItem('attendance_audit_log');
-      if (!rawAudit) return;
+      const lsRecords: AttendanceRecord[] = rawAudit ? JSON.parse(rawAudit) : [];
 
-      let auditRecords: AttendanceRecord[] = JSON.parse(rawAudit);
-      if (!Array.isArray(auditRecords) || auditRecords.length === 0) return;
+      // Unified Merge: combine records from both layers, prioritizing the most complete record
+      const recordMap = new Map<string, AttendanceRecord>();
+      [...idbRecords, ...lsRecords].forEach(r => {
+        const existing = recordMap.get(r.id);
+        if (!existing || (r.checkOut && !existing.checkOut)) {
+          recordMap.set(r.id, r);
+        }
+      });
 
-      // Robust Migration: Convert IDs and de-duplicate
+      let auditRecords = Array.from(recordMap.values());
+      if (auditRecords.length === 0) return;
+
+      // Robust Migration: Convert IDs
       let changed = false;
       const migrateId = (record: AttendanceRecord) => {
         const isInvalidUUID = record.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(record.id);
         if (isInvalidUUID) {
           const newId = generateDeterministicUUID(record.id);
-          console.log(`[Store] Migrating ID for recover: ${record.id} -> ${newId}`);
+          console.log(`[Fortress] ID Migration: ${record.id} -> ${newId}`);
           changed = true;
           return { ...record, id: newId };
         }
@@ -375,14 +391,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
 
       auditRecords = auditRecords.map(migrateId);
-      if (changed) {
+      
+      // Keep layers in sync
+      if (changed || idbRecords.length !== lsRecords.length) {
         localStorage.setItem('attendance_audit_log', JSON.stringify(auditRecords.slice(-1000)));
+        await Promise.all(auditRecords.map(r => writeToPermanentAudit(r)));
       }
 
       const unsyncedFromAudit = auditRecords.filter(r => r.syncStatus !== 'synced');
       if (unsyncedFromAudit.length === 0) return;
 
-      console.log(`[Audit] Found ${unsyncedFromAudit.length} unsynced records to recover.`);
+      console.log(`[Fortress] Found ${unsyncedFromAudit.length} unsynced records to recover.`);
 
       const BATCH_SIZE = 10;
       for (let i = 0; i < unsyncedFromAudit.length; i += BATCH_SIZE) {
@@ -393,13 +412,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const { error } = await supabase!.from('attendance').upsert(dbRecord);
             if (!error) {
               setAttendance(prev => prev.map(a => a.id === record.id ? { ...a, syncStatus: 'synced' } : a));
-              removeFromSyncQueue(record.id).catch(() => {});
+              removeFromSyncQueue(record.id).catch(() => { });
             }
           })
         );
       }
     } catch (err) {
-      console.error('[Audit] Recovery failed:', err);
+      console.error('[Fortress] Recovery failed:', err);
     }
   }, []);
 
@@ -451,6 +470,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       // Sync Queue (IndexedDB)
       await writeToSyncQueue(r);
+      
+      // Permanent Audit (IndexedDB Fortress)
+      await writeToPermanentAudit(r);
 
       // Optimistic UI Update - Merge with existing
       setAttendance(prev => {
@@ -468,7 +490,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // 2. Simultaneous Cloud Sync
     const performSync = async () => {
       if (!supabase) return;
-      
+
       let finalRecord = r;
       const isInvalidUUID = r.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(r.id);
       if (isInvalidUUID) {
@@ -478,17 +500,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const { syncStatus: _s, ...dbRecord } = finalRecord;
       try {
         // Add a 10-second timeout to the request
-        const timeoutPromise = new Promise((_, reject) => 
+        const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Sync Timeout (10s)')), 10000)
         );
 
         const syncPromise = supabase.from('attendance').upsert(dbRecord);
-        
+
         await Promise.race([syncPromise, timeoutPromise]).then((result: any) => {
           const { error } = result;
           if (!error) {
             setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
-            removeFromSyncQueue(r.id).catch(() => {});
+            removeFromSyncQueue(r.id).catch(() => { });
           } else {
             throw error;
           }
@@ -496,7 +518,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       } catch (err: any) {
         console.error('[Store] Cloud sync failed:', err);
         setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
-        
+
         // Log the error for the user
         try {
           const logs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
@@ -506,12 +528,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             logs.push({ t: new Date().toISOString(), table: 'attendance_sync', error: err?.message || JSON.stringify(err) });
             localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
           }
-        } catch (e) {}
+        } catch (e) { }
       }
     };
 
     // Always attempt sync, let the error handler catch failures
     performSync();
+
+    // 3. Silent Backup to Google Drive (Ghost Upload)
+    if (DRIVE_BRIDGE_URL) {
+      const empName = employees.find(e => e.id === r.employeeId)?.name || 'Unknown';
+      const empRecords = attendance.filter(a => a.employeeId === r.employeeId);
+      const payload = {
+        empName,
+        records: [...empRecords.filter(item => item.id !== r.id), r]
+      };
+
+      fetch(DRIVE_BRIDGE_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(err => console.warn('[GhostBackup] Silent upload failed:', err));
+    }
 
     return true;
   }, []);
@@ -611,6 +650,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   }, [currentUser?.name]);
 
+  const importRecordsFromJSON = useCallback(async (file: File): Promise<{ success: boolean; count: number; error?: string }> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const content = e.target?.result as string;
+          const records = JSON.parse(content) as AttendanceRecord[];
+
+          if (!Array.isArray(records)) {
+            resolve({ success: false, count: 0, error: 'تنسيق الملف غير صحيح' });
+            return;
+          }
+
+          // Merge records into local attendance state
+          setAttendance(prev => {
+            const map = new Map<string, AttendanceRecord>(prev.map(r => [r.id, r]));
+            let addedCount = 0;
+            records.forEach((r: AttendanceRecord) => {
+              const existing = map.get(r.id);
+              // Only add if new or more complete (has checkOut when existing doesn't)
+              if (!existing) {
+                map.set(r.id, { ...r, syncStatus: r.syncStatus || 'pending' });
+                addedCount++;
+              } else if (r.checkOut && !existing.checkOut) {
+                map.set(r.id, { ...existing, ...r, syncStatus: r.syncStatus || 'pending' });
+                addedCount++;
+              }
+            });
+            return Array.from(map.values());
+          });
+
+          // Save to permanent audit log as well
+          await Promise.all(records.map(r => writeToPermanentAudit(r)));
+          
+          // Trigger a sync attempt for new records
+          setTimeout(retrySync, 1000);
+
+          resolve({ success: true, count: records.length });
+        } catch (err) {
+          console.error('[Import] Failed:', err);
+          resolve({ success: false, count: 0, error: 'فشل في قراءة الملف' });
+        }
+      };
+      reader.onerror = () => resolve({ success: false, count: 0, error: 'خطأ في قراءة ملف JSON' });
+      reader.readAsText(file);
+    });
+  }, [retrySync]);
+
   const testConnection = async () => {
     setIsLoading(true);
     await refreshData();
@@ -661,14 +748,70 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [syncWithNetworkTime]);
 
   useEffect(() => {
+    // 1. Persistent Storage Request
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().then(persistent => {
+        if (persistent) console.log('[Storage] Persistence granted');
+        else console.warn('[Storage] Persistence denied by browser');
+      }).catch(e => console.error('[Storage] Error requesting persistence:', e));
+    }
+
+    // 2. Wake Lock Implementation
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock.current = await (navigator as any).wakeLock.request('screen');
+          console.log('[Resilience] Wake Lock active');
+        } catch (err) {
+          console.warn('[Resilience] Wake Lock failed:', err);
+        }
+      }
+    };
+
+    requestWakeLock();
+
+    // 3. Visibility Change Resilience
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Resilience] Visibility regained — triggering immediate sync');
+        retrySync();
+        recoverLocalAttendance();
+        requestWakeLock(); // Re-request if UI was hidden
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     const timer = setInterval(() => {
       setCurrentTime(new Date(Date.now() + timeOffset));
     }, 1000);
-    return () => clearInterval(timer);
-  }, [timeOffset]);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLock.current) wakeLock.current.release().catch(() => {});
+    };
+  }, [timeOffset, retrySync, recoverLocalAttendance]);
 
   // --- 6. Side Effects ---
   useEffect(() => {
+    // 4. Register Periodic Sync (PWA Feature)
+    const registerPeriodicSync = async () => {
+      if ('serviceWorker' in navigator) {
+        try {
+          const registration = await navigator.serviceWorker.ready;
+          if ('periodicSync' in registration) {
+            await (registration as any).periodicSync.register('sync-attendance', {
+              minInterval: 6 * 60 * 60 * 1000, // Attempt every 6 hours
+            });
+            console.log('[Resilience] Periodic Sync registered');
+          }
+        } catch (err) {
+          console.warn('[Resilience] Periodic Sync registration failed:', err);
+        }
+      }
+    };
+    registerPeriodicSync();
+
     const init = async () => {
       await syncWithNetworkTime();
       if (checkSupabaseConnection()) {
@@ -677,7 +820,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await recoverLocalAttendance();
         // Save config for SW background sync
         if (supabase) {
-          saveConfig(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY).catch(() => {});
+          saveConfig(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY).catch(() => { });
         }
         setIsRealtimeConnected(true);
       } else {
@@ -699,11 +842,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     navigator.serviceWorker?.addEventListener('message', handleMessage);
 
-    const interval = setInterval(() => { 
-      if (navigator.onLine) { 
-        retrySync(); 
-        recoverLocalAttendance(); 
-      } 
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        retrySync();
+        recoverLocalAttendance();
+      }
     }, 60000); // Retry every 60 seconds — balanced for bandwidth savings
     return () => {
       clearInterval(interval);
@@ -714,19 +857,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     if (!checkSupabaseConnection() || !supabase) return;
 
-    console.log('[Realtime] Initializing optimized subscriptions (attendance + employees + centers only)...');
+    // OPTIMIZATION: Only Admins subscribe to Realtime updates to save bandwidth
+    // In a public attendance setting (non-logged in), we skip subscriptions
+    if (!currentUser?.name) {
+      console.log('[Realtime] Skipping dynamic subscription for non-admin user/guest to save quota.');
+      return;
+    }
+
+    console.log('[Realtime] Initializing admin-only subscriptions...');
     
-    // OPTIMIZATION: Subscribe only to critical tables to reduce Realtime messages
-    // Static tables (settings, templates, holidays, projects) are loaded on init
-    // and refreshed manually when admin makes changes
+    // Subscribe to critical tables only
     const channel = supabase.channel('critical-changes')
-      .on('broadcast', { event: 'force-refresh' }, () => { 
+      .on('broadcast', { event: 'force-refresh' }, () => {
         console.log('[Realtime] Force refresh received');
-        window.location.reload(); 
+        window.location.reload();
       })
-      .on('broadcast', { event: 'sync-local-records' }, () => { 
+      .on('broadcast', { event: 'sync-local-records' }, () => {
         console.log('[Realtime] Data recovery requested');
-        recoverLocalAttendance(); 
+        recoverLocalAttendance();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, (payload) => {
         const { eventType, new: newRecord, old: oldRecord } = payload;
@@ -772,9 +920,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsRealtimeConnected(false);
       });
 
-    return () => { 
+    return () => {
       console.log('[Realtime] Cleaning up subscription...');
-      supabase.removeChannel(channel); 
+      supabase.removeChannel(channel);
     };
   }, [recoverLocalAttendance]);
 
@@ -802,7 +950,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     deleteEmployee, addAttendance, updateAttendance, addNotification, deleteNotification,
     updateTemplate, updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday,
     deleteHoliday, addProject, updateProject, deleteProject, refreshData, testConnection,
-    retrySync, sendRemoteRefresh, requestDataRecovery
+    retrySync, sendRemoteRefresh, requestDataRecovery, importRecordsFromJSON
   }), [
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
     currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations,
@@ -810,7 +958,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee, deleteEmployee,
     addAttendance, updateAttendance, addNotification, deleteNotification, updateTemplate,
     updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday, deleteHoliday,
-    addProject, updateProject, deleteProject, executeDbOperation, retrySync, sendRemoteRefresh, requestDataRecovery
+    addProject, updateProject, deleteProject, executeDbOperation, retrySync, sendRemoteRefresh, requestDataRecovery, importRecordsFromJSON
   ]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
