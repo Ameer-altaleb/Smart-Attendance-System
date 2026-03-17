@@ -21,6 +21,9 @@ function openDb() {
       if (!db.objectStoreNames.contains('config')) {
         db.createObjectStore('config', { keyPath: 'key' });
       }
+      if (!db.objectStoreNames.contains('permanent-audit')) {
+        db.createObjectStore('permanent-audit', { keyPath: 'id' });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -109,12 +112,26 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// Background Sync for Attendance — Now with IndexedDB direct sync
+// Background Sync for Attendance
 self.addEventListener('sync', event => {
   if (event.tag === 'sync-attendance') {
     event.waitUntil(syncAttendance());
   }
 });
+
+// Periodic Background Sync (PWA Feature)
+self.addEventListener('periodicsync', event => {
+  if (event.tag === 'sync-attendance') {
+    console.log('[SW] Periodic Sync triggered');
+    event.waitUntil(syncAttendance());
+  }
+});
+
+// SW Heartbeat: Keep-alive interval
+setInterval(() => {
+  console.log('[SW] Heartbeat — Pinging clients...');
+  notifyClients().catch(() => {});
+}, 300000); // Every 5 minutes
 
 async function syncAttendance() {
   console.log('[SW] Attempting background sync via IndexedDB...');
