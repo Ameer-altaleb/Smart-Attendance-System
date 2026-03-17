@@ -244,20 +244,20 @@ const AttendancePublic: React.FC = () => {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      const today = format(currentSyncedTime, 'yyyy-MM-dd');
+      const today = getTodayDateString(currentSyncedTime);
       const oldDeterministicId = `${today}_${selectedEmployeeId}`;
       const deterministicId = generateDeterministicUUID(oldDeterministicId);
 
-      // العثور على أحدث سجل للموظف في الواجهة المحلية (ندعم المعرف القديم والجديد للاستمرارية)
+      // Find newest record for this employee today
       const recentRecord = attendance.find(a => a.id === deterministicId || a.id === oldDeterministicId);
 
       const isShiftWorker = localEmployee.workType === 'shifts';
       const hasOpenRecord = recentRecord && recentRecord.checkIn && !recentRecord.checkOut;
 
       if (type === 'in') {
-        // للموظف الإداري، نمنع تكرار الدخول في نفس اليوم إذا كان السجل موجوداً ومكتمل الدخول
-        if (!isShiftWorker && recentRecord?.checkIn) {
-          setMessage({ text: 'لقد سجلت دخولك مسبقاً لهذا اليوم.', type: 'error' });
+        // Prevent duplicate check-in
+        if (recentRecord?.checkIn) {
+          setMessage({ text: 'لديك بصمة دخول اليوم', type: 'error' });
           setIsSubmitting(false);
           return;
         }
@@ -291,7 +291,13 @@ const AttendancePublic: React.FC = () => {
           });
         }
       } else {
-        // في نمط "جهاز البصمة"، نسمح بالخروج حتى لو لم يظهر الدخول محلياً
+        // Prevent duplicate check-out
+        if (recentRecord?.checkOut) {
+          setMessage({ text: 'لديك بصمة خروج اليوم', type: 'error' });
+          setIsSubmitting(false);
+          return;
+        }
+
         const now = currentSyncedTime;
         const early = !isShiftWorker
           ? calculateEarlyDeparture(now, selectedCenter.defaultEndTime, selectedCenter.checkOutGracePeriod)
@@ -407,15 +413,15 @@ const AttendancePublic: React.FC = () => {
           <div className="flex justify-center gap-3 flex-wrap">
             {isTimeSynced && (
               <div className="px-3 py-1 bg-emerald-50/80 backdrop-blur-sm border border-emerald-100/50 rounded-full shadow-sm flex items-center gap-1.5">
-                <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
-                <span className="text-[9px] font-black text-emerald-700 uppercase">GMT+3 Synced</span>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span className="text-[9px] font-black text-emerald-700 uppercase">صحة الوقت</span>
               </div>
             )}
             <div className={`px-3 py-1 backdrop-blur-sm border rounded-full shadow-sm flex items-center gap-1.5 ${locationStatus === 'active' ? 'bg-indigo-50/80 border-indigo-100/50 text-indigo-700' :
               'bg-rose-50/80 border-rose-100/50 text-rose-700'
               }`}>
               <Navigation className="w-3 h-3" />
-              <span className="text-[9px] font-black uppercase">{locationStatus === 'active' ? 'GPS Active' : 'GPS Inactive'}</span>
+              <span className="text-[9px] font-black uppercase">{locationStatus === 'active' ? 'الموقع نشط' : 'الموقع غير مفعل'}</span>
             </div>
             {/* Unsynced Records Indicator + Manual Retry */}
             {unsyncedCount > 0 && (
@@ -521,7 +527,7 @@ const AttendancePublic: React.FC = () => {
               </div>
 
               {matchedCenter && selectedEmployeeId && (() => {
-                const todayStr = format(currentTime, 'yyyy-MM-dd');
+                const todayStr = getTodayDateString(currentTime);
                 let todayRecord = attendance.find(a => a.employeeId === selectedEmployeeId && a.date === todayStr);
 
                 // دمج ذكي لموظفي المناوبات: جلب أحدث سجل مفتوح حتى لو كان من يوم سابق
@@ -658,14 +664,14 @@ const AttendancePublic: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="h-6 w-[1px] bg-slate-200 hidden md:block"></div>
             <Globe className={`w-5 h-5 ${matchedCenter ? 'text-emerald-500' : 'text-slate-400'}`} />
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-              {matchedCenter ? `IP: ${userIP}` : 'Dynamic Network'}
+            <span className="text-[10px] font-black text-slate-400/20 uppercase tracking-[0.2em]">
+              {matchedCenter ? `ID: ${userIP.split('.').pop()}` : 'Connected'}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <div className="h-6 w-[1px] bg-slate-200 hidden md:block"></div>
-            <span className="text-[9px] font-black text-indigo-600/60 uppercase tracking-widest">
-              Version {APP_VERSION}
+            <span className="text-[9px] font-black text-indigo-600/10 uppercase tracking-widest">
+              Secure System
             </span>
           </div>
         </div>
