@@ -89,6 +89,7 @@ const Dashboard: React.FC = () => {
   } = useApp();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [importing, setImporting] = React.useState(false);
+  const [isRecovering, setIsRecovering] = React.useState(false);
   const today = getTodayDateString(getSyriaDate(currentTime));
 
   // --- Logic & Data Processing ---
@@ -219,14 +220,23 @@ const Dashboard: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => {
-                  requestDataRecovery();
-                  alert('تم إرسال أمر استعادة البيانات عبر موجات البث. في حال عدم استجابة الأجهزة (بسبب المتصفح)، يرجى استخدام زر الرفع اليدوي أدناه.');
+                onClick={async () => {
+                  setIsRecovering(true);
+                  await requestDataRecovery();
+                  setTimeout(() => {
+                    setIsRecovering(false);
+                    alert('تم إرسال "أمر السحب الخارق" لكل الأجهزة المتصلة. سيقوم الموظفون برفع سجلات الـ 15 يوماً الماضية تلقائياً.');
+                  }, 2000);
                 }}
-                className="p-3 bg-white/5 rounded-2xl hover:bg-white/10 transition-all border border-white/10 flex flex-col items-center gap-2 group"
+                disabled={isRecovering}
+                className="p-3 bg-white/5 rounded-2xl hover:bg-white/10 transition-all border border-white/10 flex flex-col items-center gap-2 group disabled:opacity-50"
               >
-                <RefreshCcw className="w-4 h-4 text-indigo-400 group-hover:rotate-180 transition-transform duration-500" />
-                <span className="text-[8px] font-black uppercase">سحب آلي (Broadcast)</span>
+                {isRecovering ? (
+                  <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />
+                ) : (
+                  <RefreshCcw className="w-4 h-4 text-indigo-400 group-hover:rotate-180 transition-transform duration-500" />
+                )}
+                <span className="text-[8px] font-black uppercase">سحب آلي (15 يوم)</span>
               </button>
 
               <button
