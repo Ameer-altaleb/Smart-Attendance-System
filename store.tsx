@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from 'react';
 import { Center, Employee, Admin, AttendanceRecord, Holiday, MessageTemplate, SystemSettings, Notification, Project } from './types.ts';
+import { isAfter, subDays } from 'date-fns';
+import { getSyriaDate } from './utils/attendanceLogic';
 import {
   INITIAL_TEMPLATES,
   INITIAL_SETTINGS,
@@ -353,11 +355,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   }, [executeDbOperation]);
 
-  // Deep recovery: scan both permanent audit (IndexedDB) and audit log (LocalStorage)
+  // Deep 15-Day Recovery: scan both permanent audit (IndexedDB) and audit log (LocalStorage)
   const recoverLocalAttendance = useCallback(async () => {
     if (!checkSupabaseConnection() || !supabase) return;
 
     try {
+      console.log('[Fortress] Initiating 15-Day Vault Scan (Master Pull Request)...');
+      
       // Layer 1: IndexedDB Permanent Audit (The Fortress)
       const idbRecords = await getAllFromPermanentAudit();
       
@@ -375,15 +379,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
 
       let auditRecords = Array.from(recordMap.values());
-      if (auditRecords.length === 0) return;
+      
+      // Filter for last 15 days to comply with "The 15-Day Vault" requirement
+      const fifteenDaysAgo = subDays(getSyriaDate(), 15);
+      auditRecords = auditRecords.filter(r => {
+        try {
+          return isAfter(new Date(r.date), fifteenDaysAgo);
+        } catch (e) { return true; } // Keep if date is invalid just in case
+      });
 
-      // Robust Migration: Convert IDs
+      if (auditRecords.length === 0) {
+        console.log('[Fortress] No records found in the 15-day vault.');
+        return;
+      }
+
+      // Robust Migration: Convert IDs if necessary
       let changed = false;
       const migrateId = (record: AttendanceRecord) => {
         const isInvalidUUID = record.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(record.id);
         if (isInvalidUUID) {
           const newId = generateDeterministicUUID(record.id);
-          console.log(`[Fortress] ID Migration: ${record.id} -> ${newId}`);
           changed = true;
           return { ...record, id: newId };
         }
@@ -392,18 +407,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       auditRecords = auditRecords.map(migrateId);
       
-      // Keep layers in sync
+      // Keep layers in sync and prune old logs from LS to keep it lean (IDB handles the rest)
       if (changed || idbRecords.length !== lsRecords.length) {
-        localStorage.setItem('attendance_audit_log', JSON.stringify(auditRecords.slice(-1000)));
+        localStorage.setItem('attendance_audit_log', JSON.stringify(auditRecords.slice(-500)));
         await Promise.all(auditRecords.map(r => writeToPermanentAudit(r)));
       }
 
       const unsyncedFromAudit = auditRecords.filter(r => r.syncStatus !== 'synced');
-      if (unsyncedFromAudit.length === 0) return;
+      if (unsyncedFromAudit.length === 0) {
+        console.log('[Fortress] All 15-day records are already synced.');
+        return;
+      }
 
-      console.log(`[Fortress] Found ${unsyncedFromAudit.length} unsynced records to recover.`);
+      console.log(`[Fortress] Found ${unsyncedFromAudit.length} unsynced records. Pushing to server...`);
 
-      const BATCH_SIZE = 10;
+      const BATCH_SIZE = 5;
       for (let i = 0; i < unsyncedFromAudit.length; i += BATCH_SIZE) {
         const batch = unsyncedFromAudit.slice(i, i + BATCH_SIZE);
         await Promise.allSettled(
@@ -417,10 +435,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           })
         );
       }
+      console.log('[Fortress] Master Pull sync completed successfully.');
     } catch (err) {
-      console.error('[Fortress] Recovery failed:', err);
+      console.error('[Fortress] Master Pull recovery failed:', err);
     }
-  }, []);
+  }, [retrySync]);
 
   const addCenter = useCallback(async (c: Center) => {
     setCenters(prev => [...prev, c]);
@@ -857,14 +876,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     if (!checkSupabaseConnection() || !supabase) return;
 
-    // OPTIMIZATION: Only Admins subscribe to Realtime updates to save bandwidth
-    // In a public attendance setting (non-logged in), we skip subscriptions
-    if (!currentUser?.name) {
-      console.log('[Realtime] Skipping dynamic subscription for non-admin user/guest to save quota.');
-      return;
-    }
-
-    console.log('[Realtime] Initializing admin-only subscriptions...');
+    // ALL users (Admins & Employees) subscribe to commands broadcast
+    // but only Admins subscribe to Postgres table changes to save quota/bandwidth.
+    const isGuest = !currentUser?.name;
+    
+    console.log(`[Realtime] Initializing subscriptions (Type: ${isGuest ? 'Guest' : 'Admin'})...`);
     
     // Subscribe to critical tables only
     const channel = supabase.channel('critical-changes')
@@ -876,49 +892,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         console.log('[Realtime] Data recovery requested');
         recoverLocalAttendance();
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, (payload) => {
-        const { eventType, new: newRecord, old: oldRecord } = payload;
-        if (!isMounted.current) return;
-        console.log(`[Realtime] attendance: ${eventType}`);
-        if (eventType === 'INSERT') {
-          setAttendance(prev => prev.some(r => r.id === (newRecord as AttendanceRecord).id) ? prev : [...prev, { ...newRecord as AttendanceRecord, syncStatus: 'synced' }]);
-        } else if (eventType === 'UPDATE') {
-          setAttendance(prev => prev.map(r => r.id === (newRecord as AttendanceRecord).id ? { ...newRecord as AttendanceRecord, syncStatus: 'synced' } : r));
-        } else if (eventType === 'DELETE') {
-          setAttendance(prev => prev.filter(r => r.id !== (oldRecord as any).id));
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, (payload) => {
-        const { eventType, new: newRecord, old: oldRecord } = payload;
-        if (!isMounted.current) return;
-        console.log(`[Realtime] employees: ${eventType}`);
-        if (eventType === 'INSERT') {
-          setEmployees(prev => prev.some(e => e.id === (newRecord as Employee).id) ? prev : [...prev, newRecord as Employee]);
-        } else if (eventType === 'UPDATE') {
-          const updated = newRecord as Employee;
-          if (updated.deleted_at) setEmployees(prev => prev.filter(e => e.id !== updated.id));
-          else setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e));
-        } else if (eventType === 'DELETE') {
-          setEmployees(prev => prev.filter(e => e.id !== (oldRecord as any).id));
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'centers' }, (payload) => {
-        const { eventType, new: newRecord, old: oldRecord } = payload;
-        if (!isMounted.current) return;
-        console.log(`[Realtime] centers: ${eventType}`);
-        if (eventType === 'INSERT') {
-          setCenters(prev => prev.some(c => c.id === (newRecord as Center).id) ? prev : [...prev, newRecord as Center]);
-        } else if (eventType === 'UPDATE') {
-          setCenters(prev => prev.map(c => c.id === (newRecord as Center).id ? (newRecord as Center) : c));
-        } else if (eventType === 'DELETE') {
-          setCenters(prev => prev.filter(c => c.id !== (oldRecord as any).id));
-        }
-      })
       .subscribe((status) => {
         console.log(`[Realtime] Subscription status: ${status}`);
         if (status === 'SUBSCRIBED') setIsRealtimeConnected(true);
         else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsRealtimeConnected(false);
       });
+
+    // Only add Postgres changes for logged-in admins
+    if (!isGuest) {
+      channel
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, (payload) => {
+          const { eventType, new: newRecord, old: oldRecord } = payload;
+          if (!isMounted.current) return;
+          console.log(`[Realtime] attendance: ${eventType}`);
+          if (eventType === 'INSERT') {
+            setAttendance(prev => prev.some(r => r.id === (newRecord as AttendanceRecord).id) ? prev : [...prev, { ...newRecord as AttendanceRecord, syncStatus: 'synced' }]);
+          } else if (eventType === 'UPDATE') {
+            setAttendance(prev => prev.map(r => r.id === (newRecord as AttendanceRecord).id ? { ...newRecord as AttendanceRecord, syncStatus: 'synced' } : r));
+          } else if (eventType === 'DELETE') {
+            setAttendance(prev => prev.filter(r => r.id !== (oldRecord as any).id));
+          }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, (payload) => {
+          const { eventType, new: newRecord, old: oldRecord } = payload;
+          if (!isMounted.current) return;
+          console.log(`[Realtime] employees: ${eventType}`);
+          if (eventType === 'INSERT') {
+            setEmployees(prev => prev.some(e => e.id === (newRecord as Employee).id) ? prev : [...prev, newRecord as Employee]);
+          } else if (eventType === 'UPDATE') {
+            const updated = newRecord as Employee;
+            if (updated.deleted_at) setEmployees(prev => prev.filter(e => e.id !== updated.id));
+            else setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e));
+          } else if (eventType === 'DELETE') {
+            setEmployees(prev => prev.filter(e => e.id !== (oldRecord as any).id));
+          }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'centers' }, (payload) => {
+          const { eventType, new: newRecord, old: oldRecord } = payload;
+          if (!isMounted.current) return;
+          console.log(`[Realtime] centers: ${eventType}`);
+          if (eventType === 'INSERT') {
+            setCenters(prev => prev.some(c => c.id === (newRecord as Center).id) ? prev : [...prev, newRecord as Center]);
+          } else if (eventType === 'UPDATE') {
+            setCenters(prev => prev.map(c => c.id === (newRecord as Center).id ? (newRecord as Center) : c));
+          } else if (eventType === 'DELETE') {
+            setCenters(prev => prev.filter(c => c.id !== (oldRecord as any).id));
+          }
+        });
+    }
 
     return () => {
       console.log('[Realtime] Cleaning up subscription...');
