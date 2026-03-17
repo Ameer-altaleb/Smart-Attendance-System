@@ -28,7 +28,7 @@ const AttendancePublic: React.FC = () => {
     currentTime, timeOffset, isTimeSynced, retrySync
   } = useApp();
 
-  const unsyncedCount = useMemo(() => 
+  const unsyncedCount = useMemo(() =>
     attendance.filter(a => a.syncStatus === 'pending' || a.syncStatus === 'failed').length,
     [attendance]
   );
@@ -297,7 +297,7 @@ const AttendancePublic: React.FC = () => {
           ? calculateEarlyDeparture(now, selectedCenter.defaultEndTime, selectedCenter.checkOutGracePeriod)
           : 0;
 
-        const hours = recentRecord?.checkIn 
+        const hours = recentRecord?.checkIn
           ? calculateWorkingHours(new Date(recentRecord.checkIn), now)
           : 0;
 
@@ -552,21 +552,6 @@ const AttendancePublic: React.FC = () => {
                             {todayRecord?.checkIn ? format(new Date(todayRecord.checkIn), 'hh:mm a', { locale: ar }) : '--:--'}
                           </p>
                         </div>
-                        {todayRecord?.checkIn && (
-                          <div className="absolute top-2 left-2">
-                            {todayRecord.syncStatus === 'synced' ? (
-                              <div className="flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                                <Globe className="w-2.5 h-2.5 text-emerald-600" />
-                                <span className="text-[8px] font-black text-emerald-700">سحابي</span>
-                              </div>
-                            ) : (
-                               <div className="flex items-center gap-1 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20 animate-pulse">
-                                <RefreshCw className="w-2.5 h-2.5 text-amber-600 animate-spin" />
-                                <span className="text-[8px] font-black text-amber-700">محلي</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
 
                       <div className={`p-4 rounded-2xl border flex items-center gap-3 relative ${todayRecord?.checkOut ? 'bg-indigo-50 border-indigo-100/50' : 'bg-slate-50 border-slate-100'}`}>
@@ -579,21 +564,6 @@ const AttendancePublic: React.FC = () => {
                             {todayRecord?.checkOut ? format(new Date(todayRecord.checkOut), 'hh:mm a', { locale: ar }) : '--:--'}
                           </p>
                         </div>
-                        {todayRecord?.checkOut && (
-                          <div className="absolute top-2 left-2">
-                             {todayRecord.syncStatus === 'synced' ? (
-                              <div className="flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                                <Globe className="w-2.5 h-2.5 text-emerald-600" />
-                                <span className="text-[8px] font-black text-emerald-700">سحابي</span>
-                              </div>
-                            ) : (
-                               <div className="flex items-center gap-1 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20 animate-pulse">
-                                <RefreshCw className="w-2.5 h-2.5 text-amber-600 animate-spin" />
-                                <span className="text-[8px] font-black text-amber-700">محلي</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
 
@@ -604,8 +574,7 @@ const AttendancePublic: React.FC = () => {
                           <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
                         </div>
                         <div className="space-y-1">
-                          <p className="text-sm font-black text-indigo-800">جاري الاتصال بالنظام المركزي...</p>
-                          <p className="text-[10px] font-bold text-indigo-500">يتم استرجاع سجلاتك من قاعدة البيانات</p>
+                          <p className="text-sm font-black text-indigo-800">جاري تحميل البيانات...</p>
                         </div>
                       </div>
                     )}
@@ -635,16 +604,6 @@ const AttendancePublic: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Sync Error Alert */}
-                    {(todayRecord?.syncStatus === 'failed') && (
-                      <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 animate-pulse">
-                        <AlertTriangle className="w-5 h-5 text-rose-500" />
-                        <div className="flex-1">
-                          <p className="text-xs font-black text-rose-800">فشلت المزامنة اللحظية مع السيرفر</p>
-                          <p className="text-[10px] font-bold text-rose-600">سيقوم النظام بإعادة المحاولة تلقائياً في الخلفية. بياناتك محفوظة على الجهاز.</p>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
@@ -709,17 +668,6 @@ const AttendancePublic: React.FC = () => {
               Version {APP_VERSION}
             </span>
           </div>
-          <div 
-            onClick={() => {
-              const savedLogs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
-              setLogs(savedLogs);
-              setShowLogs(true);
-            }}
-            className="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center transition-colors cursor-pointer mr-2"
-            title="System Diagnostics"
-          >
-            <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-pulse"></div>
-          </div>
         </div>
       </div>
 
@@ -776,41 +724,6 @@ const AttendancePublic: React.FC = () => {
                 className="w-full bg-slate-900 text-white font-black py-5 md:py-6 rounded-2xl md:rounded-[2.5rem] hover:bg-black transition-all flex items-center justify-center gap-3 uppercase text-[10px] md:text-xs tracking-widest active:scale-95 shadow-xl shadow-slate-900/20"
               >
                 <Check className="w-5 h-5 md:w-6 md:h-6 text-emerald-400" /> قرأت وأوافق
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showLogs && (
-        <div className="fixed inset-0 z-[500] bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden shadow-2xl">
-            <div className="p-6 border-b flex justify-between items-center bg-slate-50">
-              <h3 className="font-black text-slate-800">سجل أخطاء النظام (Debug Logs)</h3>
-              <button onClick={() => setShowLogs(false)} className="text-slate-400 hover:text-slate-600"><CheckCircle2 className="w-6 h-6 rotate-45" /></button>
-            </div>
-            <div className="flex-1 overflow-auto p-4 space-y-3 bg-slate-50/50">
-              {logs.length === 0 ? (
-                <p className="text-center py-10 text-slate-400 font-bold">لا يوجد أخطاء مسجلة حالياً</p>
-              ) : (
-                logs.map((log, i) => (
-                  <div key={i} className="p-4 bg-white border rounded-xl text-xs space-y-2 shadow-sm">
-                    <div className="flex justify-between font-bold text-indigo-600 border-b pb-1">
-                      <span>{log.table}</span>
-                      <span dir="ltr">{log.t.split('T')[1].split('.')[0]}</span>
-                    </div>
-                    <pre className="whitespace-pre-wrap text-[10px] text-rose-600 font-mono bg-rose-50/30 p-2 rounded border border-rose-100">
-                      {JSON.stringify(log.error, null, 2)}
-                    </pre>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="p-4 border-t bg-white">
-              <button 
-                onClick={() => { localStorage.removeItem('sys_error_logs'); setLogs([]); }}
-                className="w-full py-3 bg-rose-600 text-white font-black rounded-xl hover:bg-rose-700 transition-all text-sm"
-              >
-                مسح السجل
               </button>
             </div>
           </div>

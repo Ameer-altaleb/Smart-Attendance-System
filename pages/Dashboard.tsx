@@ -5,7 +5,8 @@ import {
   AlertCircle, TrendingUp, ArrowUpRight,
   ShieldCheck, Zap, UserCheck, UserMinus,
   Activity, Map as MapIcon, CalendarDays, Loader2, WifiOff, RefreshCcw,
-  CheckCircle2, AlertTriangle, Bell, Clock8, Info, Search, PowerOff
+  CheckCircle2, AlertTriangle, Bell, Clock8, Info, Search, PowerOff,
+  Upload, Database, HardDriveDownload, ExternalLink
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -82,7 +83,12 @@ const PresenceItem = memo(({ employee, record, type }: { employee: any, record: 
 });
 
 const Dashboard: React.FC = () => {
-  const { employees, centers, attendance, pendingOperations, requestDataRecovery, currentTime, timeOffset } = useApp();
+  const {
+    employees, centers, attendance, pendingOperations,
+    requestDataRecovery, currentTime, timeOffset, importRecordsFromJSON
+  } = useApp();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = React.useState(false);
   const today = getTodayDateString(getSyriaDate(currentTime));
 
   // --- Logic & Data Processing ---
@@ -104,11 +110,11 @@ const Dashboard: React.FC = () => {
   // Current Presence Logic (The source of truth)
   const presence = useMemo(() => {
     const fortyEightHoursAgo = new Date(currentTime.getTime() - (48 * 60 * 60 * 1000));
-    
+
     return attendance.filter(a => {
       if (a.checkOut || !a.checkIn) return false;
       if (!activeCenterIds.has(a.centerId)) return false;
-      
+
       const emp = employeeMap.get(a.employeeId);
       if (!emp) return false;
 
@@ -130,7 +136,7 @@ const Dashboard: React.FC = () => {
   // Discipline Alerts
   const alerts = useMemo(() => {
     const list: { type: 'late' | 'missing_checkout' | 'system', title: string, sub: string, priority: 'high' | 'med' }[] = [];
-    
+
     // Late today
     const lateCount = attendance.filter(a => a.date === today && a.status === 'late').length;
     if (lateCount > 0) {
@@ -171,7 +177,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-1000 pb-20">
-      
+
       {/* Top Navigation & Status Bar */}
       <div className="flex flex-col xl:flex-row gap-6">
         {/* Welcome & Global Sync */}
@@ -188,31 +194,80 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
           </div>
-
-          <div className="flex items-center gap-3">
-            <div className={`px-4 py-2 rounded-2xl border flex items-center gap-3 transition-colors
-              ${pendingOperations > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
-              <div className={`w-2 h-2 rounded-full ${pendingOperations > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></div>
-              <span className={`text-[10px] font-black uppercase tracking-widest ${pendingOperations > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
-                {pendingOperations > 0 ? `بانتظار مزامنة ${pendingOperations} سجلات` : 'النظام متزامن بالكامل'}
-              </span>
-            </div>
-            <button 
-              onClick={() => {
-                requestDataRecovery();
-                alert('تم إرسال أمر استعادة البيانات لكافة الأجهزة النشطة. ستظهر السجلات هنا فور مزامنتها.');
-              }}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2 group active:scale-95"
-              title="سحب البيانات العالقة من هواتف الموظفين"
-            >
-              <RefreshCcw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
-              <span className="text-[10px] font-black uppercase tracking-tight">سحب البيانات من الأجهزة</span>
-            </button>
+          <div className={`px-4 py-2 rounded-2xl border flex items-center gap-3 transition-colors
+            ${pendingOperations > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+            <div className={`w-2 h-2 rounded-full ${pendingOperations > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></div>
+            <span className={`text-[10px] font-black uppercase tracking-widest ${pendingOperations > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+              {pendingOperations > 0 ? `بانتظار مزامنة ${pendingOperations} سجلات` : 'النظام متزامن بالكامل'}
+            </span>
           </div>
         </GlassCard>
 
-        {/* Dynamic Alerts */}
+        {/* Dynamic Alerts & Emergency Tools */}
         <div className="xl:w-[400px] flex flex-col gap-3">
+          {/* Emergency Pull Tool */}
+          <div className="bg-slate-900 text-white p-6 rounded-[2.5rem] shadow-xl shadow-slate-200 border border-slate-800 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center">
+                <Database className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h4 className="text-xs font-black uppercase tracking-widest">أدوات طوارئ السيرفر</h4>
+                <p className="text-[9px] font-bold text-slate-400">استرجاع السجلات يدوياً عند انقطاع السيرفر</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  requestDataRecovery();
+                  alert('تم إرسال أمر استعادة البيانات عبر موجات البث. في حال عدم استجابة الأجهزة (بسبب المتصفح)، يرجى استخدام زر الرفع اليدوي أدناه.');
+                }}
+                className="p-3 bg-white/5 rounded-2xl hover:bg-white/10 transition-all border border-white/10 flex flex-col items-center gap-2 group"
+              >
+                <RefreshCcw className="w-4 h-4 text-indigo-400 group-hover:rotate-180 transition-transform duration-500" />
+                <span className="text-[8px] font-black uppercase">سحب آلي (Broadcast)</span>
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+                className="p-3 bg-indigo-600/10 rounded-2xl hover:bg-indigo-600/20 transition-all border border-indigo-500/30 flex flex-col items-center gap-2 group"
+              >
+                {importing ? <Loader2 className="w-4 h-4 animate-spin text-indigo-400" /> : <Upload className="w-4 h-4 text-indigo-400" />}
+                <span className="text-[8px] font-black uppercase">استيراد يدوي (JSON)</span>
+              </button>
+            </div>
+
+            <button
+              onClick={() => window.open('https://drive.google.com/', '_blank')}
+              className="w-full p-3 bg-slate-800 rounded-2xl hover:bg-slate-700 transition-all border border-slate-700 flex items-center justify-center gap-2 group"
+            >
+              <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" />
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-300 group-hover:text-white">تصفح أرشيف السجلات (Google Drive)</span>
+            </button>
+            
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".json"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setImporting(true);
+                  const result = await importRecordsFromJSON(file);
+                  setImporting(false);
+                  if (result.success) {
+                    alert(`تم استيراد ${result.count} سجل بنجاح ودمجهم في التقارير.`);
+                  } else {
+                    alert(`فشل الاستيراد: ${result.error}`);
+                  }
+                }
+              }}
+            />
+          </div>
+
           {alerts.length > 0 ? alerts.map((alert, i) => (
             <div key={i} className={`flex items-center gap-4 p-4 rounded-3xl border animate-in slide-in-from-right duration-500 delay-${i * 100}
               ${alert.priority === 'high' ? 'bg-rose-50 border-rose-100 text-rose-800' : 'bg-amber-50 border-amber-100 text-amber-800'}`}>
@@ -250,7 +305,7 @@ const Dashboard: React.FC = () => {
 
       {/* Detailed Viewports */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        
+
         {/* Live Presence Lists */}
         <GlassCard className="xl:col-span-2 space-y-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
@@ -306,13 +361,13 @@ const Dashboard: React.FC = () => {
         {/* Center Health Coverage */}
         <div className="space-y-6">
           <GlassCard className="h-full space-y-6">
-             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center gap-3">
                 <div className="w-1.5 h-6 bg-emerald-600 rounded-full"></div>
                 <h3 className="text-lg font-black text-slate-800">تغطية المراكز</h3>
               </div>
             </div>
-            
+
             <div className="space-y-5 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
               {centerHealth.map(({ center, centerEmps, centerPresent, health }) => (
                 <div key={center.id} className="space-y-2">
@@ -354,7 +409,7 @@ const Dashboard: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 900 }} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 900 }} />
-                <Tooltip 
+                <Tooltip
                   contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
                   labelStyle={{ fontWeight: 900, fontSize: '12px' }}
                 />
@@ -370,7 +425,7 @@ const Dashboard: React.FC = () => {
             <h3 className="text-lg font-black text-slate-800 tracking-tight">توزيع الحالة</h3>
           </div>
           <div className="h-[200px]">
-             <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={[
@@ -383,7 +438,7 @@ const Dashboard: React.FC = () => {
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {[0,1,2].map((entry, index) => (
+                  {[0, 1, 2].map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={['#10b981', '#f59e0b', '#f1f5f9'][index]} />
                   ))}
                 </Pie>
