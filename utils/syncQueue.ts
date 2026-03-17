@@ -20,6 +20,9 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('config')) {
         db.createObjectStore('config', { keyPath: 'key' });
       }
+      if (!db.objectStoreNames.contains('permanent-audit')) {
+        db.createObjectStore('permanent-audit', { keyPath: 'id' });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -92,6 +95,35 @@ export async function clearSyncQueue(): Promise<void> {
     store.clear();
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+  });
+}
+
+/**
+ * Write a copy to the permanent audit log (Fortress Layer)
+ */
+export async function writeToPermanentAudit(record: any): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('permanent-audit', 'readwrite');
+    const store = tx.objectStore('permanent-audit');
+    // We store even synced records here as a fail-safe
+    const req = store.put(record);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/**
+ * Get all records from the permanent audit log
+ */
+export async function getAllFromPermanentAudit(): Promise<any[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('permanent-audit', 'readonly');
+    const store = tx.objectStore('permanent-audit');
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
   });
 }
 
