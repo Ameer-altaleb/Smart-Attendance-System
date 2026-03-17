@@ -553,7 +553,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     return true;
-  }, []);
+  }, [employees, attendance, supabase]);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
     // Exactly the same logic as addAttendance because it uses Upsert on the backend
