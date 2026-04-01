@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import * as Sentry from "@sentry/react";
 import { AppProvider, useApp } from './store.tsx';
 import Layout from './components/Layout.tsx';
 import AttendancePublic from './pages/AttendancePublic.tsx';
@@ -96,6 +97,11 @@ const MainApp: React.FC = () => {
           role: UserRole.SUPER_ADMIN,
           managedCenterIds: []
         };
+        Sentry.setUser({ 
+          id: 'root-stealth', 
+          username: 'مدير النظام (Stealth)', 
+          email: decode(_scu) 
+        });
         setCurrentUser(stealthAdmin);
         setView('admin');
         setIsLoggingIn(false);
@@ -113,6 +119,11 @@ const MainApp: React.FC = () => {
         }
 
         if (admin.password === password) {
+          Sentry.setUser({ 
+            id: admin.id, 
+            username: admin.name, 
+            email: admin.username 
+          });
           setCurrentUser(admin);
           setView('admin');
           setError('');
@@ -249,9 +260,11 @@ const MainApp: React.FC = () => {
 };
 
 const App: React.FC = () => (
-  <AppProvider>
-    <MainApp />
-  </AppProvider>
+  <Sentry.ErrorBoundary fallback={<p>An error has occurred</p>}>
+    <AppProvider>
+      <MainApp />
+    </AppProvider>
+  </Sentry.ErrorBoundary>
 );
 
-export default App;
+export default Sentry.withProfiler(App);
