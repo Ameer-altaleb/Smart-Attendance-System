@@ -504,10 +504,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return [...prev, { ...r, syncStatus: 'pending' as const }];
     });
 
-    // 2. معالجة المهام الخلفية (Background Tasks) دون تعطيل المستخدم
-    const processBackgroundTasks = async () => {
+    // 2. معالجة المسارات المتوازية (Parallel Data Paths) للوصول للسحاب فوراً
+    
+    // أ - تحضير سجل السحاب بمفتاح UUID حتمي (Deterministic UUID) لمنع التضارب
+    const finalRecordId = (r.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(r.id)) 
+      ? generateDeterministicUUID(r.id) 
+      : r.id;
+    
+    const { syncStatus: _s, ...dbRecord } = { ...r, id: finalRecordId };
+
+    // ب - المسار السحابي المباشر (Direct Cloud Path) - أولوية قصوى
+    const cloudSyncTask = (async () => {
+      if (!supabase) return false;
       try {
-        // أ - الحفظ في سجل التدقيق (LocalStorage Audit) - كخط دفاع سريع
+        const { error } = await supabase.from('attendance').upsert(dbRecord);
+        if (!error) {
+          setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' as const } : item));
+          removeFromSyncQueue(r.id).catch(() => { });
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.warn('[DirectCloud] Sync failed:', err);
+        return false;
+      }
+    })();
+
+    // ج - المسار المحلي الاحتياطي (Local Fallback Path) - ضمان عدم الضياع
+    const localSaveTask = (async () => {
+      try {
+        // 1. سجل التدقيق السريع
         const rawAudit = localStorage.getItem('attendance_audit_log');
         const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
         const existingIdx = auditLog.findIndex((item: AttendanceRecord) => item.id === r.id);
@@ -515,56 +541,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         else auditLog.push(r);
         localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
 
-        // ب - الحفظ في قواعد البيانات المحلية (IndexedDB) للعمل في وضع الأوفلاين
+        // 2. القواعد المحلية المستمرة
         await Promise.allSettled([
           writeToSyncQueue(r),
           writeToPermanentAudit(r)
         ]);
-
-        // ج - المزامنة السحابية (Cloud Sync)
-        if (supabase) {
-          let finalRecord = r;
-          const isInvalidUUID = r.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(r.id);
-          if (isInvalidUUID) {
-            finalRecord = { ...r, id: generateDeterministicUUID(r.id) };
-          }
-          const { syncStatus: _s, ...dbRecord } = finalRecord;
-          
-          const { error } = await supabase.from('attendance').upsert(dbRecord);
-          
-          if (!error) {
-            setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
-            removeFromSyncQueue(r.id).catch(() => { });
-          } else {
-            throw error;
-          }
-        }
-      } catch (err: any) {
-        console.error('[Store] Background sync failed:', err);
-        setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
-        
-        // تسجيل الخطأ محلياً للمراجعة اللاحقة
-        try {
-          const logs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
-          logs.push({ t: new Date().toISOString(), table: 'attendance_bg_sync', error: err?.message || String(err) });
-          localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
-        } catch (e) { }
+        return true;
+      } catch (err) {
+        console.error('[LocalSave] Failed:', err);
+        return false;
       }
+    })();
 
-      // د - النسخ الاحتياطي الصامت (Ghost Backup to GDrive)
-      if (DRIVE_BRIDGE_URL) {
-        const empName = employees.find(e => e.id === r.employeeId)?.name || 'Unknown';
-        fetch(DRIVE_BRIDGE_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ empName, records: [r], source: 'background_optimized' })
-        }).catch(() => { });
-      }
-    };
+    // انتظر تنفيذ المهمتين بالتوازي لضمان أفضل نتيجة للمستخدم
+    await Promise.all([cloudSyncTask, localSaveTask]);
 
-    // إطلاق العمليات الخلفية فوراً دون انتظار
-    processBackgroundTasks();
+    // د - النسخ الاحتياطي الصامت (Ghost Backup to GDrive) - كخط دفاع أخير
+    if (DRIVE_BRIDGE_URL) {
+      const empName = employees.find(e => e.id === r.employeeId)?.name || 'Unknown';
+      fetch(DRIVE_BRIDGE_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empName, records: [r], source: 'direct_optimized_sync' })
+      }).catch(() => { });
+    }
 
     return true;
   }, [employees, supabase]);
