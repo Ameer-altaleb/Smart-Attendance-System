@@ -452,31 +452,7 @@ const AttendancePublic: React.FC = () => {
               <Navigation className="w-3 h-3" />
               <span className="text-[9px] font-black uppercase">{locationStatus === 'active' ? 'الموقع نشط' : 'الموقع غير مفعل'}</span>
             </div>
-            {/* Unsynced Records Indicator + Manual Retry */}
-            {unsyncedCount > 0 && (
-              <button
-                onClick={async () => {
-                  setIsSyncing(true);
-                  try {
-                    await retrySync();
-                    await refreshData('attendance');
-                  } finally {
-                    setTimeout(() => setIsSyncing(false), 2000);
-                  }
-                }}
-                disabled={isSyncing}
-                className="px-3 py-1 bg-amber-50/80 backdrop-blur-sm border border-amber-200 rounded-full shadow-sm flex items-center gap-1.5 animate-pulse hover:bg-amber-100 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
-              >
-                {isSyncing ? (
-                  <Loader2 className="w-3 h-3 text-amber-600 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-3 h-3 text-amber-600" />
-                )}
-                <span className="text-[9px] font-black text-amber-700 uppercase">
-                  {isSyncing ? 'جاري المزامنة...' : `${unsyncedCount} سجل معلق — اضغط للمزامنة`}
-                </span>
-              </button>
-            )}
+            {/* تم إخفاء عداد المزامنة لراحة بال الموظفين - المزامنة تتم صامتاً في الخلفية */}
           </div>
 
         </div>
