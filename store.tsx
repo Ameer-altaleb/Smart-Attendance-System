@@ -718,47 +718,55 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoading(false);
   };
 
-  // --- 5. Global Time Sync Logic ---
+  // --- 5. Global Time Sync Logic - Pure Single Source (Damascus) ---
   const syncWithNetworkTime = useCallback(async () => {
-    const timeAPIs = [
-      'https://timeapi.io/api/Time/current/zone?timeZone=Europe/Istanbul',
-      'https://worldtimeapi.org/api/timezone/Europe/Istanbul',
-      'https://worldtimeapi.org/api/timezone/Asia/Damascus'
-    ];
+    // ONE TRUTH: Strictly Asia/Damascus time to avoid jumps
+    const apiUrl = 'https://worldtimeapi.org/api/timezone/Asia/Damascus';
+    
+    try {
+      const start = Date.now();
+      const response = await fetch(apiUrl, { cache: 'no-store' });
+      if (!response.ok) return;
 
-    for (const apiUrl of timeAPIs) {
-      try {
-        const start = Date.now();
-        const response = await fetch(apiUrl, { cache: 'no-store' });
-        if (!response.ok) continue;
+      const data = await response.json();
+      const networkTime = new Date(data.datetime).getTime();
+      const end = Date.now();
+      const latency = (end - start) / 2;
 
-        const data = await response.json();
-        const remoteDateStr = data.dateTime || data.datetime;
-        const networkTime = new Date(remoteDateStr).getTime();
+      const correctedNetworkTime = networkTime + latency;
+      const localDeviceTime = Date.now();
+      const offset = correctedNetworkTime - localDeviceTime;
 
-        const end = Date.now();
-        const latency = (end - start) / 2;
-
-        const correctedNetworkTime = networkTime + latency;
-        const localDeviceTime = Date.now();
-
-        const offset = correctedNetworkTime - localDeviceTime;
-
-        if (Math.abs(offset) > 30000 || !isTimeSynced) {
-          setTimeOffset(offset);
-          setIsTimeSynced(true);
-        }
-        return;
-      } catch (err) {
-        console.warn(`[TimeSync] Failed with ${apiUrl}:`, err);
-      }
+      // Always update on the first sync or if there's a drift
+      setTimeOffset(offset);
+      setIsTimeSynced(true);
+    } catch (err) {
+      console.warn('[TimeSync] Single Source Failure:', err);
     }
-  }, [isTimeSynced]);
+  }, []);
 
   useEffect(() => {
+    // Initial immediate sync
     syncWithNetworkTime();
-    const interval = setInterval(syncWithNetworkTime, 300000); // Sync every 5 mins
-    return () => clearInterval(interval);
+
+    // Fast Refresh: Every 60 seconds (standard for attendance systems)
+    const interval = setInterval(syncWithNetworkTime, 60000);
+
+    // Bulletproof Sync: Re-sync EVERY time the user returns to the tab or focuses it
+    const handleReactivation = () => {
+      console.log('[TimeSync] System Reactivated - Forcing immediate network sync...');
+      syncWithNetworkTime();
+    };
+
+    window.addEventListener('focus', handleReactivation);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') handleReactivation();
+    });
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleReactivation);
+    };
   }, [syncWithNetworkTime]);
 
   useEffect(() => {
