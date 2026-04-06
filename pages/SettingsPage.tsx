@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../store.tsx';
+import { APP_VERSION } from '../constants.tsx';
 import {
   Settings, Shield, Globe, Clock, Save,
   Monitor, CheckCircle, Upload, Database, HardDriveDownload,
@@ -101,6 +102,22 @@ const SettingsPage: React.FC = () => {
     }, 800);
   };
 
+  const publishUpdateToAll = async () => {
+    if (confirm(`هل أنت متأكد من فرض التحديث (النسخة ${APP_VERSION}) على جميع الموظفين؟ سيظهر لهم شاشة إجبارية للتحديث قبل تسجيل الحضور.`)) {
+      setIsSavingSystem(true);
+      addLog(`إرسال أمر التزامن الإجباري للإصدار: ${APP_VERSION}`, 'system');
+      try {
+        await updateSettings({ ...settings, schema_version: APP_VERSION });
+        addLog('تم اعتماد الإصدار الجديد بنجاح. كافة الهواتف ستطلب التحديث الآن.', 'success');
+        triggerSuccess('تم نشر التحديث للجميع');
+      } catch (err) {
+        addLog('فشل في نشر التحديث: ' + (err as Error).message, 'error');
+      } finally {
+        setIsSavingSystem(false);
+      }
+    }
+  };
+
   const triggerSuccess = (msg: string) => {
     setSaveStatus(msg);
     setTimeout(() => setSaveStatus(null), 3000);
@@ -180,6 +197,15 @@ const SettingsPage: React.FC = () => {
                   title="سحب البصمات المحلية من أجهزة الموظفين"
                 >
                   <DatabaseBackup className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={publishUpdateToAll}
+                  disabled={isSavingSystem || settings.schema_version === APP_VERSION}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center gap-2 shadow-xl shadow-emerald-600/20 disabled:opacity-50"
+                  title="اعتماد هذا التحديث لكافة الموظفين"
+                >
+                  <Upload className="w-4 h-4" />
+                  {settings.schema_version === APP_VERSION ? 'تم النشر' : 'نشر التحديث للجميع'}
                 </button>
                 <button
                   onClick={runDiagnosticAnalysis}
