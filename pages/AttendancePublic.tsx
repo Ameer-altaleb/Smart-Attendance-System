@@ -302,8 +302,8 @@ const AttendancePublic: React.FC = () => {
           updateLocalUICache(currentSyncedTime.toISOString(), 'in');
           const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
           
-          // تأخير إجباري لمدة 4 ثوانٍ لضمان اكتمال العمليات الخلفية وراحة بال المستخدم
-          await new Promise(resolve => setTimeout(resolve, 4000));
+          // تأخير بصري خفيف (800ms) لثبوت رسالة النجاح بعد المزامنة المباشرة
+          await new Promise(resolve => setTimeout(resolve, 800));
           
           setMessage({
             text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح وتأمين بياناتك'),
@@ -349,8 +349,8 @@ const AttendancePublic: React.FC = () => {
           updateLocalUICache(now.toISOString(), 'out');
           const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
           
-          // تأخير إجباري لمدة 4 ثوانٍ لضمان اكتمال العمليات الخلفية
-          await new Promise(resolve => setTimeout(resolve, 4000));
+          // تأخير بصري خفيف (800ms) لثبوت رسالة النجاح بعد المزامنة المباشرة
+          await new Promise(resolve => setTimeout(resolve, 800));
 
           setMessage({
             text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح وتأمين بياناتك'),
