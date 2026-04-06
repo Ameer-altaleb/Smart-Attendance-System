@@ -7,7 +7,7 @@ import {
   Calendar, Bell, MessageSquare, Settings, Briefcase,
   LogOut, Menu, X, LayoutDashboard, ChevronLeft, ShieldCheck, Wifi, WifiOff
 } from 'lucide-react';
-import GeminiAssistant from './GeminiAssistant.tsx';
+
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -123,7 +123,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, onNavigate }) => 
           {children}
         </div>
 
-        <GeminiAssistant />
+
       </div>
     </div>
   );

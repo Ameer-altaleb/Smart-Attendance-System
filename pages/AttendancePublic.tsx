@@ -301,8 +301,12 @@ const AttendancePublic: React.FC = () => {
         if (success) {
           updateLocalUICache(currentSyncedTime.toISOString(), 'in');
           const template = templates.find(t => t.type === (delay > 0 ? 'late_check_in' : 'check_in'));
+          
+          // تأخير إجباري لمدة 4 ثوانٍ لضمان اكتمال العمليات الخلفية وراحة بال المستخدم
+          await new Promise(resolve => setTimeout(resolve, 4000));
+          
           setMessage({
-            text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح'),
+            text: (template?.content.replace('{minutes}', delay.toString()) || 'تم تسجيل الدخول بنجاح وتأمين بياناتك'),
             type: 'success'
           });
         }
@@ -344,8 +348,12 @@ const AttendancePublic: React.FC = () => {
         if (success) {
           updateLocalUICache(now.toISOString(), 'out');
           const template = templates.find(t => t.type === (early > 0 ? 'early_check_out' : 'check_out'));
+          
+          // تأخير إجباري لمدة 4 ثوانٍ لضمان اكتمال العمليات الخلفية
+          await new Promise(resolve => setTimeout(resolve, 4000));
+
           setMessage({
-            text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح'),
+            text: (template?.content.replace('{minutes}', early.toString()) || 'تم تسجيل الخروج بنجاح وتأمين بياناتك'),
             type: 'success'
           });
         }
@@ -370,25 +378,29 @@ const AttendancePublic: React.FC = () => {
     <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4 md:p-8 font-cairo text-right relative overflow-hidden" dir="rtl">
       {/* Loading Overlay */}
       {isSubmitting && (
-        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-[4px] flex flex-col items-center justify-center p-6 text-center">
-          <div className="bg-white p-10 rounded-[3rem] shadow-2xl space-y-6 max-w-sm w-full animate-in zoom-in-95 duration-300">
-            <div className="relative mx-auto w-20 h-20">
-              <div className="absolute inset-0 border-4 border-indigo-100 rounded-full"></div>
-              <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
-              <Save className="absolute inset-0 m-auto w-8 h-8 text-indigo-600 animate-pulse" />
+        <div className="fixed inset-0 z-[300] bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+          <div className="bg-white p-10 md:p-14 rounded-[3.5rem] shadow-2xl space-y-8 max-w-sm w-full animate-in zoom-in-95 duration-300 border-4 border-indigo-500/20">
+            <div className="relative mx-auto w-24 h-24">
+              <div className="absolute inset-0 border-8 border-indigo-100 rounded-full"></div>
+              <div className="absolute inset-0 border-8 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
+              <ShieldCheck className="absolute inset-0 m-auto w-10 h-10 text-indigo-600 animate-pulse" />
             </div>
-            <div className="space-y-2">
-              <h3 className="text-xl font-black text-slate-900">جاري تسجيل البصمة...</h3>
-              <p className="text-sm text-slate-500 font-bold leading-relaxed">يرجى الانتظار والاتصال بالإنترنت، <span className="text-rose-600">لا تغلق الصفحة الآن</span> لضمان وصول بياناتك.</p>
+            <div className="space-y-4">
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight">جاري تأمين البصمة...</h3>
+              <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
+                <p className="text-sm text-rose-700 font-black leading-relaxed">
+                   يرجى الانتظار، <span className="underline decoration-2">لا تغلق الصفحة الآن</span> لضمان وصول بياناتك للسيرفر بأمان.
+                </p>
+              </div>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest animate-pulse">إجراء أمني لضمان المزامنة السحابية</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* Decorative Background Elements */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-600/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1s' }}></div>
-      <div className="absolute top-[20%] right-[-5%] w-[30%] h-[30%] bg-indigo-400/5 rounded-full blur-[80px]"></div>
+      {/* Simplified Decorative Background */}
+      <div className="absolute top-[-5%] left-[-5%] w-[30%] h-[30%] bg-indigo-600/5 rounded-full blur-[100px]"></div>
+      <div className="absolute bottom-[-5%] right-[-5%] w-[30%] h-[30%] bg-emerald-600/5 rounded-full blur-[100px]"></div>
 
       <div className="w-full max-w-2xl space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-1000 relative z-10">
         {/* Unified Compact Header */}

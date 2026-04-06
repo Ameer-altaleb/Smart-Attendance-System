@@ -212,7 +212,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           // This ensures shift workers can check out even if they checked in yesterday
           const today = new Date(Date.now() + timeOffset);
           const todayStr = today.toISOString().split('T')[0];
-          query = query.or(`date.gte.${todayStr},check_out.is.null`);
+          query = query.or(`date.gte.${todayStr},checkOut.is.null`);
         }
         return await query;
       });
@@ -474,105 +474,79 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [executeDbOperation]);
 
   const addAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
-    // 1. Immediate Local Persistence (Synchronous for the user)
-    try {
-      // Audit Log
-      const rawAudit = localStorage.getItem('attendance_audit_log');
-      const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
-      const existingIdx = auditLog.findIndex((item: AttendanceRecord) => item.id === r.id);
-      if (existingIdx >= 0) {
-        auditLog[existingIdx] = { ...auditLog[existingIdx], ...r };
-      } else {
-        auditLog.push(r);
+    // 1. التحديث البصري الفوري (Optimistic UI Update) لضمان سرعة الاستجابة
+    setAttendance(prev => {
+      const existing = prev.find(item => item.id === r.id);
+      if (existing) {
+        return prev.map(item => item.id === r.id ? { ...item, ...r, syncStatus: 'pending' as const } : item);
       }
-      localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
+      return [...prev, { ...r, syncStatus: 'pending' as const }];
+    });
 
-      // Sync Queue (IndexedDB)
-      await writeToSyncQueue(r);
-      
-      // Permanent Audit (IndexedDB Fortress)
-      await writeToPermanentAudit(r);
-
-      // Optimistic UI Update - Merge with existing
-      setAttendance(prev => {
-        const existing = prev.find(item => item.id === r.id);
-        if (existing) {
-          return prev.map(item => item.id === r.id ? { ...item, ...r, syncStatus: 'pending' as const } : item);
-        }
-        return [...prev, { ...r, syncStatus: 'pending' as const }];
-      });
-    } catch (e) {
-      console.error('[Store] Local persistence failed:', e);
-      // Even if local fails, we try to continue
-    }
-
-    // 2. Simultaneous Cloud Sync
-    const performSync = async () => {
-      if (!supabase) return;
-
-      let finalRecord = r;
-      const isInvalidUUID = r.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(r.id);
-      if (isInvalidUUID) {
-        finalRecord = { ...r, id: generateDeterministicUUID(r.id) };
-      }
-
-      const { syncStatus: _s, ...dbRecord } = finalRecord;
+    // 2. معالجة المهام الخلفية (Background Tasks) دون تعطيل المستخدم
+    const processBackgroundTasks = async () => {
       try {
-        // Add a 10-second timeout to the request
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Sync Timeout (10s)')), 10000)
-        );
+        // أ - الحفظ في سجل التدقيق (LocalStorage Audit) - كخط دفاع سريع
+        const rawAudit = localStorage.getItem('attendance_audit_log');
+        const auditLog = rawAudit ? JSON.parse(rawAudit) : [];
+        const existingIdx = auditLog.findIndex((item: AttendanceRecord) => item.id === r.id);
+        if (existingIdx >= 0) auditLog[existingIdx] = { ...auditLog[existingIdx], ...r };
+        else auditLog.push(r);
+        localStorage.setItem('attendance_audit_log', JSON.stringify(auditLog.slice(-1000)));
 
-        const syncPromise = supabase.from('attendance').upsert(dbRecord);
+        // ب - الحفظ في قواعد البيانات المحلية (IndexedDB) للعمل في وضع الأوفلاين
+        await Promise.allSettled([
+          writeToSyncQueue(r),
+          writeToPermanentAudit(r)
+        ]);
 
-        await Promise.race([syncPromise, timeoutPromise]).then((result: any) => {
-          const { error } = result;
+        // ج - المزامنة السحابية (Cloud Sync)
+        if (supabase) {
+          let finalRecord = r;
+          const isInvalidUUID = r.id.includes('_') || !/^[0-9a-f-]{36}$/i.test(r.id);
+          if (isInvalidUUID) {
+            finalRecord = { ...r, id: generateDeterministicUUID(r.id) };
+          }
+          const { syncStatus: _s, ...dbRecord } = finalRecord;
+          
+          const { error } = await supabase.from('attendance').upsert(dbRecord);
+          
           if (!error) {
             setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'synced' } : item));
             removeFromSyncQueue(r.id).catch(() => { });
           } else {
             throw error;
           }
-        });
+        }
       } catch (err: any) {
-        console.error('[Store] Cloud sync failed:', err);
+        console.error('[Store] Background sync failed:', err);
         setAttendance(prev => prev.map(item => item.id === r.id ? { ...item, syncStatus: 'failed' } : item));
-
-        // Log the error for the user
+        
+        // تسجيل الخطأ محلياً للمراجعة اللاحقة
         try {
           const logs = JSON.parse(localStorage.getItem('sys_error_logs') || '[]');
-          // Avoid duplicate identical logs
-          const lastLog = logs[logs.length - 1];
-          if (!lastLog || lastLog.error !== (err?.message || JSON.stringify(err))) {
-            logs.push({ t: new Date().toISOString(), table: 'attendance_sync', error: err?.message || JSON.stringify(err) });
-            localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
-          }
+          logs.push({ t: new Date().toISOString(), table: 'attendance_bg_sync', error: err?.message || String(err) });
+          localStorage.setItem('sys_error_logs', JSON.stringify(logs.slice(-50)));
         } catch (e) { }
+      }
+
+      // د - النسخ الاحتياطي الصامت (Ghost Backup to GDrive)
+      if (DRIVE_BRIDGE_URL) {
+        const empName = employees.find(e => e.id === r.employeeId)?.name || 'Unknown';
+        fetch(DRIVE_BRIDGE_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ empName, records: [r], source: 'background_optimized' })
+        }).catch(() => { });
       }
     };
 
-    // Always attempt sync, let the error handler catch failures
-    performSync();
-
-    // 3. Silent Backup to Google Drive (Ghost Upload)
-    if (DRIVE_BRIDGE_URL) {
-      const empName = employees.find(e => e.id === r.employeeId)?.name || 'Unknown';
-      const empRecords = attendance.filter(a => a.employeeId === r.employeeId);
-      const payload = {
-        empName,
-        records: [...empRecords.filter(item => item.id !== r.id), r]
-      };
-
-      fetch(DRIVE_BRIDGE_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).catch(err => console.warn('[GhostBackup] Silent upload failed:', err));
-    }
+    // إطلاق العمليات الخلفية فوراً دون انتظار
+    processBackgroundTasks();
 
     return true;
-  }, [employees, attendance, supabase]);
+  }, [employees, supabase]);
 
   const updateAttendance = useCallback(async (r: AttendanceRecord): Promise<boolean> => {
     // Exactly the same logic as addAttendance because it uses Upsert on the backend
