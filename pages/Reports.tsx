@@ -1,12 +1,14 @@
-import React, { useState, useMemo, useCallback, memo } from 'react';
+import React, { useState, useMemo, useCallback, useRef, memo } from 'react';
 import { useApp } from '../store.tsx';
 import {
   FileSpreadsheet, Printer, Clock, Activity, Zap,
   CheckCircle2, AlertTriangle, Copy, Check, Loader2, Calendar,
-  ChevronLeft, ChevronRight, Gift
+  ChevronLeft, ChevronRight, Gift, FileDown
 } from 'lucide-react';
 import { format, eachDayOfInterval, isSameDay, startOfDay, endOfDay, differenceInMinutes, parseISO } from 'date-fns';
 import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // Pagination settings
 const ITEMS_PER_PAGE = 50;
@@ -449,7 +451,7 @@ const Reports: React.FC = () => {
     const paginatedData = filtered.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
     return { filteredData: filtered, totalFiltered, totalPages, paginatedData, groupedByEmployee: grouped };
-  }, [attendance, dateFrom, dateTo, filterCenter, filterEmployee, activeCenterIds, currentPage, employeeMap]);
+  }, [attendance, dateFrom, dateTo, filterCenter, filterEmployee, activeCenterIds, currentPage, employeeMap, holidays, employees, centerMap]);
 
   const stats = useMemo(() => {
     const totalRecords = filteredData.length;
@@ -560,11 +562,97 @@ const Reports: React.FC = () => {
         setTimeout(() => setIsExporting(false), 500);
       }
     }, 100);
-  }, [filteredData, employeeMap, centerMap, dateFrom, dateTo]);
+  }, [filteredData, employeeMap, centerMap, dateFrom, dateTo, settings, reportType, filterCenter, centers]);
+
+  const printRef = useRef<HTMLDivElement>(null);
 
   const handlePrint = useCallback(() => {
     window.print();
   }, []);
+
+  const handleExportPDF = useCallback(async () => {
+    if (filteredData.length === 0) {
+      alert('لا توجد بيانات لتصديرها في الفترة المحددة.');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const printContainer = printRef.current;
+      if (!printContainer) {
+        alert('خطأ: لم يتم العثور على محتوى الطباعة.');
+        return;
+      }
+
+      // Temporarily make the print container visible for capture
+      const originalDisplay = printContainer.style.display;
+      printContainer.style.display = 'block';
+      printContainer.style.position = 'absolute';
+      printContainer.style.left = '-9999px';
+      printContainer.style.top = '0';
+      printContainer.style.width = '297mm';
+      printContainer.style.background = 'white';
+
+      // Get all page-break containers
+      const pages = printContainer.querySelectorAll('.page-break-container');
+      const isLandscape = reportType === 'monthly';
+      const pdf = new jsPDF({
+        orientation: isLandscape ? 'landscape' : 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const pageWidth = isLandscape ? 297 : 210;
+      const pageHeight = isLandscape ? 210 : 297;
+      const margin = 8;
+      const contentWidth = pageWidth - margin * 2;
+
+      if (pages.length === 0) {
+        // Fallback: capture the entire container as one page
+        const canvas = await html2canvas(printContainer, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: false
+        });
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+        const imgHeight = (canvas.height * contentWidth) / canvas.width;
+        pdf.addImage(imgData, 'JPEG', margin, margin, contentWidth, imgHeight);
+      } else {
+        for (let i = 0; i < pages.length; i++) {
+          const page = pages[i] as HTMLElement;
+          const canvas = await html2canvas(page, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            logging: false
+          });
+          const imgData = canvas.toDataURL('image/jpeg', 0.95);
+          const imgHeight = (canvas.height * contentWidth) / canvas.width;
+          const scaledHeight = Math.min(imgHeight, pageHeight - margin * 2);
+
+          if (i > 0) pdf.addPage();
+          pdf.addImage(imgData, 'JPEG', margin, margin, contentWidth, scaledHeight);
+        }
+      }
+
+      // Restore original display
+      printContainer.style.display = originalDisplay;
+      printContainer.style.position = '';
+      printContainer.style.left = '';
+      printContainer.style.top = '';
+      printContainer.style.width = '';
+      printContainer.style.background = '';
+
+      const fileName = `${reportType === 'monthly' ? 'Monthly_Timesheet' : 'Attendance_Report'}_${dateFrom}_to_${dateTo}.pdf`;
+      pdf.save(fileName);
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      alert('فشل تصدير PDF، يرجى المحاولة مرة أخرى.');
+    } finally {
+      setTimeout(() => setIsExporting(false), 500);
+    }
+  }, [filteredData, reportType, dateFrom, dateTo]);
 
   const handleCopyTable = useCallback(() => {
     const text = filteredData.map(record => {
@@ -634,6 +722,14 @@ const Reports: React.FC = () => {
           >
             {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
             تصدير Excel
+          </button>
+          <button
+            onClick={handleExportPDF}
+            disabled={isExporting}
+            className="flex-1 sm:flex-none bg-rose-600 text-white px-5 py-3.5 rounded-2xl font-black text-xs flex items-center justify-center gap-2 hover:bg-rose-700 transition-all shadow-xl shadow-rose-200 active:scale-95 disabled:opacity-50"
+          >
+            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+            تصدير PDF
           </button>
           <button
             onClick={handlePrint}
@@ -755,6 +851,7 @@ const Reports: React.FC = () => {
               record={record}
               employee={employeeMap.get(record.employeeId)}
               center={centerMap.get(record.centerId)}
+              project={projectMap.get(employeeMap.get(record.employeeId)?.projectId || '')}
               holidays={holidays}
             />
           ))}
@@ -775,7 +872,7 @@ const Reports: React.FC = () => {
 
       {/* Full Printing - LOG Mode (Per Employee Page) */}
       {reportType === 'log' && (
-        <div className="hidden print:block w-full" dir="rtl">
+        <div ref={reportType === 'log' ? printRef : undefined} className="hidden print:block w-full" dir="rtl">
           {Array.from(groupedByEmployee.entries()).map(([employeeId, records], index) => {
             const emp = employeeMap.get(employeeId);
             const employeeCenter = centerMap.get(emp?.centerId || '');
@@ -874,7 +971,7 @@ const Reports: React.FC = () => {
 
       {/* Full Printing - MONTHLY Mode (Horizontal Timesheet) */}
       {reportType === 'monthly' && (
-        <div className="hidden print:block w-full" dir="rtl">
+        <div ref={reportType === 'monthly' ? printRef : undefined} className="hidden print:block w-full" dir="rtl">
           {Array.from(groupedByEmployee.entries()).map(([employeeId, records], index) => {
             const emp = employeeMap.get(employeeId);
             const center = filterCenter === '' ? centerMap.get(records[0]?.centerId) : centers.find(c => c.id === filterCenter);
@@ -1022,7 +1119,7 @@ const Reports: React.FC = () => {
                             <p className="font-black text-[10px] border-b-2 border-slate-900 pb-2 mb-3">إقرار الموظف (Employee Signature)</p>
                             <div className="space-y-1.5 text-[9px] font-bold">
                               <p>الاسم: <span className="font-black">{emp?.name}</span></p>
-                              <p>التاريخ / Date: <span className="font-black">____ / ____ / 2026</span></p>
+                              <p>التاريخ / Date: <span className="font-black">____ / ____ / {new Date().getFullYear()}</span></p>
                               <div className="absolute bottom-4 left-4 right-4 flex items-end">
                                 <span className="text-[10px] font-black italic opacity-30">SIGN:</span>
                                 <div className="grow border-b-2 border-slate-900 border-dotted mx-2 mb-1"></div>
@@ -1074,48 +1171,46 @@ const Reports: React.FC = () => {
         @media print {
           @page { 
             size: A4 landscape; 
-            margin-top: 25mm; 
-            margin-bottom: 25mm; 
-            margin-left: 20mm; 
-            margin-right: 20mm; 
+            margin: 8mm;
           }
           body { background: white !important; padding: 0 !important; color: black !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .print\\:hidden { display: none !important; }
           aside, header, nav, .fixed, button { display: none !important; }
           main, #root { margin: 0 !important; padding: 0 !important; width: 100% !important; }
           
-          /* Force White Backgrounds Everywhere - Per User Request */
-          * { background-color: transparent !important; background-image: none !important; box-shadow: none !important; }
+          /* Clean backgrounds but preserve semantic status colors */
           body, main, #root, .page-break-container { background-color: white !important; }
+          div, section, article { background-color: transparent !important; background-image: none !important; box-shadow: none !important; }
           
           table { width: 100% !important; border-collapse: collapse !important; border: 1.5px solid #000 !important; }
           th, td { border: 1px solid #000 !important; padding: 2px 4px !important; text-align: right !important; background-color: white !important; }
           th { font-weight: 950 !important; }
           
-          /* Ensure text is black for readability */
-          [class*="text-slate-"], [class*="text-gray-"], [class*="text-indigo-"] { color: black !important; }
+          /* Make main text black but preserve status colors for visual meaning */
+          [class*="text-slate-"], [class*="text-gray-"] { color: black !important; }
+          [class*="text-emerald-"] { color: #047857 !important; }
+          [class*="text-rose-"] { color: #be123c !important; }
+          [class*="text-amber-"] { color: #b45309 !important; }
+          [class*="text-indigo-"] { color: #4338ca !important; }
 
           .print\\:block { display: block !important; }
           .print\\:flex { display: flex !important; }
           
           .page-break-container { 
             width: 277mm !important;
-            height: 175mm !important;
-            max-height: 175mm !important;
+            min-height: auto !important;
             position: relative; 
             box-sizing: border-box;
             background-color: white !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             padding: 0 !important;
             margin: 0 !important;
             border: none !important;
+            page-break-inside: avoid;
           }
           
-          /* Force landscape orientation scaling */
-          @page {
-            size: A4 landscape;
-            margin: 5mm;
-          }
+          /* Prevent tables from breaking mid-row */
+          tr { page-break-inside: avoid; }
           
           .print-footer {
             position: absolute;
