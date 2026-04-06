@@ -12,7 +12,7 @@ export const INITIAL_HOLIDAYS: Holiday[] = [];
 export const INITIAL_NOTIFICATIONS: Notification[] = [];
 
 export const INITIAL_PROJECTS: Project[] = [];
-export const APP_VERSION = '2.0.0-pwa';
+export const APP_VERSION = '2.1.0-stable';
 export const DRIVE_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycbz7UKJ5dHNXRqpwv_O2I948cdwO-nhnvJNBylq0KC2o_0p3DB4tSGVUOlWgUe3AYsCN/exec';
 
 export const INITIAL_TEMPLATES: MessageTemplate[] = [

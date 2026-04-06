@@ -14,11 +14,14 @@ import NotificationsPage from './pages/NotificationsPage.tsx';
 import MessagesPage from './pages/MessagesPage.tsx';
 import SettingsPage from './pages/SettingsPage.tsx';
 import ProjectsPage from './pages/ProjectsPage.tsx';
-import { ShieldAlert, Settings as SettingsIcon, Lock, UserCheck, Loader2 } from 'lucide-react';
+import { 
+  ShieldAlert, Settings as SettingsIcon, Lock, UserCheck, Loader2, 
+  RefreshCw, Zap 
+} from 'lucide-react';
 import { UserRole, Admin } from './types.ts';
 
 const MainApp: React.FC = () => {
-  const { currentUser, setCurrentUser, admins = [], settings } = useApp();
+  const { currentUser, setCurrentUser, admins = [], settings, isUpdateRequired } = useApp();
   const [activePage, setActivePage] = useState('dashboard');
   const [view, setView] = useState<'public' | 'admin' | 'login'>('public');
 
@@ -138,6 +141,35 @@ const MainApp: React.FC = () => {
       setIsLoggingIn(false);
     }, 600);
   };
+
+  // --- Version Enforcement UI ---
+  if (isUpdateRequired) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-cairo z-[9999] fixed inset-0">
+        <div className="max-w-md w-full bg-white rounded-[3rem] p-10 text-center space-y-8 shadow-2xl animate-in zoom-in-95 duration-500">
+          <div className="w-24 h-24 bg-amber-100 text-amber-600 rounded-[2.5rem] flex items-center justify-center mx-auto">
+            <RefreshCw className="w-12 h-12 animate-spin-slow" />
+          </div>
+          <div className="space-y-3">
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight">تحديث إلزامي مطلوب</h1>
+            <p className="text-slate-500 font-bold leading-relaxed">
+              لقد قمنا بإصدار تحسينات هامة لنظام المزامنة والوقت. يرجى التحديث الآن لضمان دقة سجلات الحضور الخاصة بك.
+            </p>
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-5 rounded-3xl transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-3 active:scale-95 translate-y-0"
+          >
+            <Zap className="w-5 h-5 fill-current" />
+            تحديث النظام الآن
+          </button>
+          <div className="pt-4 border-t border-slate-100">
+            <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">Relief Experts Integrity Control</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (view === 'admin' && currentUser) {
     const renderPage = () => {

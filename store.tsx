@@ -11,7 +11,8 @@ import {
   INITIAL_HOLIDAYS,
   INITIAL_NOTIFICATIONS,
   INITIAL_PROJECTS,
-  DRIVE_BRIDGE_URL
+  DRIVE_BRIDGE_URL,
+  APP_VERSION
 } from './constants.tsx';
 import { supabase, checkSupabaseConnection } from './lib/supabase.ts';
 import { storageManager, requestQueue, withRetry, debounce, connectionMonitor } from './utils/performance.ts';
@@ -83,6 +84,7 @@ interface AppContextType {
   timeOffset: number;
   currentTime: Date;
   isTimeSynced: boolean;
+  isUpdateRequired: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -110,6 +112,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [timeOffset, setTimeOffset] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isTimeSynced, setIsTimeSynced] = useState(false);
+  const [isUpdateRequired, setIsUpdateRequired] = useState(false);
 
   const isMounted = useRef(true);
   const wakeLock = useRef<any>(null);
@@ -139,6 +142,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
   }, []);
+
+  // 1A. Live Clock Engine - Fixed: High precision pulse with offset compensation
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (isMounted.current) {
+        // Adjust current wall time with calculated server offset
+        setCurrentTime(new Date(Date.now() + (isTimeSynced ? timeOffset : 0)));
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [timeOffset, isTimeSynced]);
 
   // --- 3. Helper Functions ---
   const updatePendingOps = useCallback((tableName: string, delta: number) => {
@@ -219,7 +233,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (error) throw error;
       if (data) {
         if (tableName === 'settings' && data.length > 0) {
-          setter(data[0]);
+          const remoteSettings = data[0];
+          setter(remoteSettings);
+          
+          // Version Gatekeeper: Check for mandatory upgrades
+          if (remoteSettings.schema_version && remoteSettings.schema_version !== APP_VERSION) {
+            console.warn(`[Version] Mismatch detected: Local(${APP_VERSION}) vs Remote(${remoteSettings.schema_version})`);
+            setIsUpdateRequired(true);
+          }
         } else if (mergeStrategy === 'merge') {
           setter((prev: any[]) => {
             const existingMap = new Map(prev.map(item => [item.id, item]));
@@ -919,7 +940,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       console.log('[Realtime] Cleaning up subscription...');
       supabase.removeChannel(channel);
     };
-  }, [recoverLocalAttendance]);
+  }, [recoverLocalAttendance, currentUser?.id]);
 
   useEffect(() => {
     const unsubscribe = connectionMonitor.subscribe((online) => {
@@ -949,6 +970,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }), [
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
     currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations,
+    isUpdateRequired,
     timeOffset, currentTime, isTimeSynced, refreshData,
     addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee, deleteEmployee,
     addAttendance, updateAttendance, addNotification, deleteNotification, updateTemplate,
