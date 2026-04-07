@@ -118,6 +118,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const wakeLock = useRef<any>(null);
 
   useEffect(() => {
+    isMounted.current = true;
     return () => { isMounted.current = false; };
   }, []);
 
@@ -226,7 +227,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           // This ensures shift workers can check out even if they checked in yesterday
           const today = new Date(Date.now() + timeOffset);
           const todayStr = today.toISOString().split('T')[0];
-          query = query.or(`date.gte.${todayStr},checkOut.is.null`);
+          query = query.or(`date.gte.${todayStr},"checkOut".is.null`);
         }
         return await query;
       });
