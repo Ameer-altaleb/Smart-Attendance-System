@@ -7,7 +7,7 @@ import {
   LogIn, LogOut, CheckCircle2, ShieldAlert, Smartphone,
   BellRing, Check, Loader2, ShieldCheck, MapPin, User, Clock, Globe, AlertTriangle, Wifi, WifiOff, Lock, Navigation, Building2, ChevronDown, Save, RefreshCw
 } from 'lucide-react';
-import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance } from '../utils/attendanceLogic.ts';
+import { calculateDelay, calculateEarlyDeparture, calculateWorkingHours, getTodayDateString, calculateDistance, getSyriaDate } from '../utils/attendanceLogic.ts';
 import { AttendanceRecord, Employee, Notification, Center } from '../types.ts';
 import { supabase } from '../lib/supabase.ts';
 import { APP_VERSION } from '../constants.tsx';
@@ -333,7 +333,7 @@ const AttendancePublic: React.FC = () => {
           centerId: selectedCenter.id,
           date: today,
           checkOut: now.toISOString(),
-          checkOutDate: format(now, 'yyyy-MM-dd'),
+          checkOutDate: format(getSyriaDate(now), 'yyyy-MM-dd'),
           earlyDepartureMinutes: early,
           workingHours: hours,
           status: recentRecord?.status || 'present',
@@ -427,12 +427,12 @@ const AttendancePublic: React.FC = () => {
           <div className="flex flex-col items-center md:items-end justify-center ml-2 border-r pr-4 border-slate-100">
             <div className="flex items-center gap-2">
               <span className="text-2xl md:text-3xl font-black text-slate-900 tabular-nums">
-                {format(currentTime, 'HH:mm')}
+                {format(getSyriaDate(currentTime), 'HH:mm')}
               </span>
               <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
             </div>
             <p className="text-[10px] md:text-xs font-bold text-slate-400">
-              {format(currentTime, 'EEEE، dd MMMM', { locale: ar })}
+              {format(getSyriaDate(currentTime), 'EEEE، dd MMMM', { locale: ar })}
             </p>
           </div>
         </div>
@@ -576,7 +576,7 @@ const AttendancePublic: React.FC = () => {
                         <div>
                           <p className="text-[10px] font-bold opacity-70">وقت الدخول</p>
                           <p className="text-sm font-black text-right" dir="ltr">
-                            {todayRecord?.checkIn ? format(new Date(todayRecord.checkIn), 'hh:mm a', { locale: ar }) : '--:--'}
+                            {todayRecord?.checkIn ? format(getSyriaDate(new Date(todayRecord.checkIn)), 'hh:mm a', { locale: ar }) : '--:--'}
                           </p>
                         </div>
                       </div>
@@ -588,7 +588,7 @@ const AttendancePublic: React.FC = () => {
                         <div>
                           <p className="text-[10px] font-bold opacity-70">وقت الخروج</p>
                           <p className="text-sm font-black text-right" dir="ltr">
-                            {todayRecord?.checkOut ? format(new Date(todayRecord.checkOut), 'hh:mm a', { locale: ar }) : '--:--'}
+                            {todayRecord?.checkOut ? format(getSyriaDate(new Date(todayRecord.checkOut)), 'hh:mm a', { locale: ar }) : '--:--'}
                           </p>
                         </div>
                       </div>
