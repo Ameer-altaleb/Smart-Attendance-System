@@ -43,8 +43,9 @@ export function getSyriaDate(date: Date = new Date()): Date {
   return new Date(utc + (3600000 * 3));
 }
 
-export function getTodayDateString(date: Date = getSyriaDate()): string {
-  return format(date, 'yyyy-MM-dd');
+export function getTodayDateString(date: Date = new Date()): string {
+  const syriaDate = getSyriaDate(date);
+  return format(syriaDate, 'yyyy-MM-dd');
 }
 
 export function normalizeArabic(text: string): string {
