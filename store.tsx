@@ -81,9 +81,7 @@ interface AppContextType {
   sendRemoteRefresh: () => Promise<void>;
   requestDataRecovery: () => Promise<void>;
   importRecordsFromJSON: (file: File) => Promise<{ success: boolean; count: number; error?: string }>;
-  timeOffset: number;
   currentTime: Date;
-  isTimeSynced: boolean;
   isUpdateRequired: boolean;
 }
 
@@ -109,9 +107,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
 
   // --- Global Time Sync State ---
-  const [timeOffset, setTimeOffset] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [isTimeSynced, setIsTimeSynced] = useState(false);
   const [isUpdateRequired, setIsUpdateRequired] = useState(false);
 
   const isMounted = useRef(true);
@@ -144,16 +140,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => window.removeEventListener('beforeunload', handleUnload);
   }, []);
 
-  // 1A. Live Clock Engine - Fixed: High precision pulse with offset compensation
+  // 1A. Live Clock Engine - Pure Device Time (Inherited from Network/OS)
   useEffect(() => {
     const timer = setInterval(() => {
       if (isMounted.current) {
-        // Adjust current wall time with calculated server offset
-        setCurrentTime(new Date(Date.now() + (isTimeSynced ? timeOffset : 0)));
+        setCurrentTime(new Date());
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [timeOffset, isTimeSynced]);
+  }, []);
 
   // --- 3. Helper Functions ---
   const updatePendingOps = useCallback((tableName: string, delta: number) => {
@@ -225,8 +220,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (tableName === 'attendance') {
           // Fetch TODAY's records + any OPEN records (no checkOut) regardless of date
           // This ensures shift workers can check out even if they checked in yesterday
-          const today = new Date(Date.now() + timeOffset);
-          const todayStr = today.toISOString().split('T')[0];
+          const today = new Date();
+          const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
           query = query.or(`date.gte.${todayStr},"checkOut".is.null`);
         }
         return await query;
@@ -720,84 +715,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoading(false);
   };
 
-  // --- 5. Global Time Sync Logic - Pure Single Source (Damascus) ---
-  const syncWithNetworkTime = useCallback(async () => {
-    try {
-      const start = Date.now();
-      let networkTime: number | null = null;
-      let latency: number = 0;
 
-      // Primary: WorldTimeAPI (Strict Damascus)
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const response = await fetch('https://worldtimeapi.org/api/timezone/Asia/Damascus', { cache: 'no-store', signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (response.ok) {
-          const data = await response.json();
-          networkTime = new Date(data.datetime).getTime();
-          latency = (Date.now() - start) / 2;
-        }
-      } catch (err) {
-        console.warn('[TimeSync] Primary API failed, trying fallback...');
-      }
-
-      // Fallback: TimeAPI.io (UTC, dynamically mapped to Syria via getSyriaDate)
-      if (!networkTime) {
-        const start2 = Date.now();
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const response = await fetch('https://timeapi.io/api/Time/current/zone?timeZone=UTC', { cache: 'no-store', signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (response.ok) {
-          const data = await response.json();
-          // timeapi.io dateTime missing 'Z', must append it for strict UTC parsing
-          networkTime = new Date(data.dateTime + 'Z').getTime();
-          latency = (Date.now() - start2) / 2;
-        }
-      }
-
-      if (networkTime) {
-        const correctedNetworkTime = networkTime + latency;
-        const localDeviceTime = Date.now();
-        const offset = correctedNetworkTime - localDeviceTime;
-
-        // Always update on the first sync or if there's a drift
-        setTimeOffset(offset);
-        setIsTimeSynced(true);
-      } else {
-        throw new Error('All network time providers failed');
-      }
-    } catch (err) {
-      console.warn('[TimeSync] Critical Sync Failure (Using device internal clock offsets):', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Initial immediate sync
-    syncWithNetworkTime();
-
-    // Fast Refresh: Every 60 seconds (standard for attendance systems)
-    const interval = setInterval(syncWithNetworkTime, 60000);
-
-    // Bulletproof Sync: Re-sync EVERY time the user returns to the tab or focuses it
-    const handleReactivation = () => {
-      console.log('[TimeSync] System Reactivated - Forcing immediate network sync...');
-      syncWithNetworkTime();
-    };
-
-    window.addEventListener('focus', handleReactivation);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') handleReactivation();
-    });
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleReactivation);
-    };
-  }, [syncWithNetworkTime]);
 
   useEffect(() => {
     // 1. Persistent Storage Request
@@ -834,7 +752,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const timer = setInterval(() => {
-      setCurrentTime(new Date(Date.now() + timeOffset));
+      setCurrentTime(new Date());
     }, 1000);
 
     return () => {
@@ -842,7 +760,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (wakeLock.current) wakeLock.current.release().catch(() => {});
     };
-  }, [timeOffset, retrySync, recoverLocalAttendance]);
+  }, [retrySync, recoverLocalAttendance]);
 
   // --- 6. Side Effects ---
   useEffect(() => {
@@ -865,7 +783,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     registerPeriodicSync();
 
     const init = async () => {
-      await syncWithNetworkTime();
       if (checkSupabaseConnection()) {
         await refreshData();
         await retrySync();
@@ -999,7 +916,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const contextValue = useMemo(() => ({
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
     currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations,
-    timeOffset, currentTime, isTimeSynced,
+    currentTime,
     setCurrentUser, addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee,
     deleteEmployee, addAttendance, updateAttendance, addNotification, deleteNotification,
     updateTemplate, updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday,
@@ -1009,7 +926,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     centers, employees, admins, attendance, holidays, projects, notifications, templates, settings,
     currentUser, isLoading, isRealtimeConnected, dbStatus, pendingOperations,
     isUpdateRequired,
-    timeOffset, currentTime, isTimeSynced, refreshData,
+    currentTime, refreshData,
     addCenter, updateCenter, deleteCenter, addEmployee, updateEmployee, deleteEmployee,
     addAttendance, updateAttendance, addNotification, deleteNotification, updateTemplate,
     updateSettings, addAdmin, updateAdmin, deleteAdmin, addHoliday, deleteHoliday,
