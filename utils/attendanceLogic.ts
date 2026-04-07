@@ -36,16 +36,14 @@ export function calculateWorkingHours(checkIn: Date, checkOut: Date): number {
 }
 
 /**
- * Returns a Date object adjusted to Syria/Turkey timezone (GMT+3)
+ * Returns the exact device local time as instructed (pure local time via WiFi)
  */
 export function getSyriaDate(date: Date = new Date()): Date {
-  const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
-  return new Date(utc + (3600000 * 3));
+  return date;
 }
 
 export function getTodayDateString(date: Date = new Date()): string {
-  const syriaDate = getSyriaDate(date);
-  return format(syriaDate, 'yyyy-MM-dd');
+  return format(date, 'yyyy-MM-dd');
 }
 
 export function normalizeArabic(text: string): string {
