@@ -25,7 +25,7 @@ const AttendancePublic: React.FC = () => {
   const {
     centers, employees, attendance, addAttendance, updateAttendance,
     updateEmployee, templates, notifications, settings, refreshData,
-    currentTime, timeOffset, isTimeSynced, retrySync
+    currentTime, retrySync
   } = useApp();
 
   const unsyncedCount = useMemo(() =>
@@ -174,7 +174,7 @@ const AttendancePublic: React.FC = () => {
     setMessage(null);
 
     try {
-      const currentSyncedTime = new Date(Date.now() + timeOffset);
+      const currentSyncedTime = new Date();
       const currentDeviceId = getDeviceId();
 
       // 1. Mandatory Network (IP) Verification
@@ -440,12 +440,10 @@ const AttendancePublic: React.FC = () => {
         {/* Status Badges Overlay */}
         <div className="flex flex-col items-center gap-3 -mt-3 relative z-20">
           <div className="flex justify-center gap-3 flex-wrap">
-            {isTimeSynced && (
-              <div className="px-3 py-1 bg-emerald-50/80 backdrop-blur-sm border border-emerald-100/50 rounded-full shadow-sm flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                <span className="text-[9px] font-black text-emerald-700 uppercase">صحة الوقت</span>
-              </div>
-            )}
+            <div className="px-3 py-1 bg-emerald-50/80 backdrop-blur-sm border border-emerald-100/50 rounded-full shadow-sm flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+              <span className="text-[9px] font-black text-emerald-700 uppercase">توقيت الجهاز</span>
+            </div>
             <div className={`px-3 py-1 backdrop-blur-sm border rounded-full shadow-sm flex items-center gap-1.5 ${locationStatus === 'active' ? 'bg-indigo-50/80 border-indigo-100/50 text-indigo-700' :
               'bg-rose-50/80 border-rose-100/50 text-rose-700'
               }`}>

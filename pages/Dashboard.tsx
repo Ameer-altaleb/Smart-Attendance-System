@@ -85,7 +85,7 @@ const PresenceItem = memo(({ employee, record, type }: { employee: any, record: 
 const Dashboard: React.FC = () => {
   const {
     employees, centers, attendance, pendingOperations,
-    requestDataRecovery, currentTime, timeOffset, importRecordsFromJSON
+    requestDataRecovery, currentTime, importRecordsFromJSON
   } = useApp();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [importing, setImporting] = React.useState(false);
