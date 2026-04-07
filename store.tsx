@@ -721,28 +721,56 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 5. Global Time Sync Logic - Pure Single Source (Damascus) ---
   const syncWithNetworkTime = useCallback(async () => {
-    // ONE TRUTH: Strictly Asia/Damascus time to avoid jumps
-    const apiUrl = 'https://worldtimeapi.org/api/timezone/Asia/Damascus';
-    
     try {
       const start = Date.now();
-      const response = await fetch(apiUrl, { cache: 'no-store' });
-      if (!response.ok) return;
+      let networkTime: number | null = null;
+      let latency: number = 0;
 
-      const data = await response.json();
-      const networkTime = new Date(data.datetime).getTime();
-      const end = Date.now();
-      const latency = (end - start) / 2;
+      // Primary: WorldTimeAPI (Strict Damascus)
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const response = await fetch('https://worldtimeapi.org/api/timezone/Asia/Damascus', { cache: 'no-store', signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const data = await response.json();
+          networkTime = new Date(data.datetime).getTime();
+          latency = (Date.now() - start) / 2;
+        }
+      } catch (err) {
+        console.warn('[TimeSync] Primary API failed, trying fallback...');
+      }
 
-      const correctedNetworkTime = networkTime + latency;
-      const localDeviceTime = Date.now();
-      const offset = correctedNetworkTime - localDeviceTime;
+      // Fallback: TimeAPI.io (UTC, dynamically mapped to Syria via getSyriaDate)
+      if (!networkTime) {
+        const start2 = Date.now();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const response = await fetch('https://timeapi.io/api/Time/current/zone?timeZone=UTC', { cache: 'no-store', signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const data = await response.json();
+          // timeapi.io dateTime missing 'Z', must append it for strict UTC parsing
+          networkTime = new Date(data.dateTime + 'Z').getTime();
+          latency = (Date.now() - start2) / 2;
+        }
+      }
 
-      // Always update on the first sync or if there's a drift
-      setTimeOffset(offset);
-      setIsTimeSynced(true);
+      if (networkTime) {
+        const correctedNetworkTime = networkTime + latency;
+        const localDeviceTime = Date.now();
+        const offset = correctedNetworkTime - localDeviceTime;
+
+        // Always update on the first sync or if there's a drift
+        setTimeOffset(offset);
+        setIsTimeSynced(true);
+      } else {
+        throw new Error('All network time providers failed');
+      }
     } catch (err) {
-      console.warn('[TimeSync] Single Source Failure:', err);
+      console.warn('[TimeSync] Critical Sync Failure (Using device internal clock offsets):', err);
     }
   }, []);
 
