@@ -495,6 +495,7 @@ const Reports: React.FC = () => {
         const headers = [
           'اسم الموظف',
           'رمز الموظف',
+          'طبيعة الدوام',
           'اسم المركز',
           'التاريخ',
           'الدخول المطلوب',
@@ -525,6 +526,7 @@ const Reports: React.FC = () => {
           return [
             emp?.name || 'غير معروف',
             emp?.code || 'N/A',
+            emp?.workType === 'shifts' ? 'مناوبات' : 'إداري',
             center?.name || 'غير معروف',
             record.date,
             center?.defaultStartTime || '-',
